@@ -6,6 +6,7 @@ const status = (text, error = false) => { $("status").textContent = text; $("sta
 const projectId = () => project?.id || project?.projectId || project?.ProjectId;
 const label = item => item.name || item.fileName || item.displayName || "Unnamed";
 const identifier = item => item.id || item.fileId || item.versionId || item.uuid;
+const fileIdentifier = item => item.fileId || item.id || item.versionId || item.uuid;
 const isFolder = item => item.directory === true || item.type === "folder" || item.type === "Folder" || item.isFolder === true || item.folder === true;
 const isIfc = item => /\.ifc$/i.test(label(item));
 function options(id, placeholder, values, value = identifier, text = label) {
@@ -57,9 +58,9 @@ function isChildOf(item, parent, parentPath) {
   if (!itemPath.startsWith(`${normalizedParent}/`)) return false;
   return !itemPath.slice(normalizedParent.length + 1).includes("/");
 }
-async function list(path) {
+async function list(path, parentEntry = null) {
   if (!projectEntries.length) projectEntries = records(await request(`/sync/${encodeURIComponent(projectId())}?excludeVersion=true`));
-  const parent = findFolder(path);
+  const parent = parentEntry || findFolder(path);
   if (!parent) return [];
   return projectEntries.filter(item => item !== parent && isChildOf(item, parent, path));
 }
@@ -79,7 +80,7 @@ async function loadIfcs() {
   try {
     status(`Loading IFC files for ${label(cwa)}...`);
     const cwaPath = entryPath(cwa) || `${COMPLETED_PATH}/${label(cwa)}`;
-    ifcs = (await list(cwaPath)).filter(isIfc).sort((a,b) => label(a).localeCompare(label(b)));
+    ifcs = (await list(cwaPath, cwa)).filter(isIfc).sort((a,b) => label(a).localeCompare(label(b)));
     options("ifcSelect", ifcs.length ? "Select IFC file..." : "No IFC files found", ifcs);
     options("productSelect", "Select an IFC file first", []);
     status(ifcs.length ? "Choose an IFC file." : `No IFC files were found in ${label(cwa)}.`, !ifcs.length);
@@ -97,7 +98,7 @@ async function loadProducts() {
   if (!file) return;
   try {
     status(`Reading product names from ${label(file)}...`);
-    const fileId = file.fileId || file.id;
+    const fileId = fileIdentifier(file);
     if (!fileId) throw new Error("The selected IFC has no file ID.");
     const downloadInfo = await request(`/files/fs/${encodeURIComponent(fileId)}/downloadurl`);
     const downloadUrl = downloadInfo?.url || downloadInfo?.data?.url;

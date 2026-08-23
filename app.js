@@ -71,15 +71,14 @@ function updateAssemblyControls() {
   $("fabricatorName").disabled = true;
   $("saveFabricator").disabled = true;
 }
-function showMarks() {
+async function loadAssemblyMarks() {
   const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
   options("markSelect", assembly?.marks.length ? "Select assembly/cast unit mark..." : "No marks found", assembly?.marks || [], item => item, item => item);
   $("fabricatorName").value = "";
   $("fabricatorName").disabled = !assembly?.marks.length;
   $("saveFabricator").disabled = !assembly?.marks.length || !$("markSelect").value;
-  loadFabricators();
 }
-async function loadFabricators() {
+async function loadFabricator() {
   if (!FABRICATION_API) return;
   try {
     const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabricators`);
@@ -156,11 +155,13 @@ async function loadCwas() {
     cwas = (await list(COMPLETED_PATH)).filter(isFolder).sort((a,b) => label(a).localeCompare(label(b)));
     options("cwaSelect", cwas.length ? "Select CWA..." : "No folders found in Completed", cwas);
     options("ifcSelect", "Select a CWA folder first", []);
-    options("productSelect", "Select an IFC file first", []);
+    options("assemblySelect", "Select an IFC file first", []);
+    options("markSelect", "Select an ASSEMBLY_NAME first", []);
+    options("fabricatorName", "Select an assembly/cast unit mark first", []);
     status(cwas.length ? "Choose a CWA folder." : "No folders were found directly inside /Completed.", !cwas.length);
   } catch (error) { status(error.message, true); }
 }
-async function loadIfcs() {
+async function loadIfcFiles() {
   const cwa = cwas.find(item => identifier(item) === $("cwaSelect").value);
   if (!cwa) return;
   try {
@@ -168,7 +169,9 @@ async function loadIfcs() {
     const cwaPath = entryPath(cwa) || `${COMPLETED_PATH}/${label(cwa)}`;
     ifcs = (await list(cwaPath, cwa)).filter(isIfc).sort((a,b) => label(a).localeCompare(label(b)));
     options("ifcSelect", ifcs.length ? "Select IFC file..." : "No IFC files found", ifcs);
-    options("productSelect", "Select an IFC file first", []);
+    options("assemblySelect", "Select an IFC file first", []);
+    options("markSelect", "Select an ASSEMBLY_NAME first", []);
+    options("fabricatorName", "Select an assembly/cast unit mark first", []);
     status(ifcs.length ? "Choose an IFC file." : `No IFC files were found in ${label(cwa)}.`, !ifcs.length);
   } catch (error) { status(error.message, true); }
 }
@@ -179,11 +182,11 @@ function productNames(text) {
   while ((found = pattern.exec(text))) { const name = found[1].replace(/''/g, "'").trim(); if (name && name !== "$") names.add(name); }
   return [...names].sort((a,b) => a.localeCompare(b));
 }
-async function loadProducts() {
+async function loadAssemblyNames() {
   const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
   if (!file) return;
   try {
-    status(`Reading product names from ${label(file)}...`);
+    status(`Reading ASSEMBLY_NAME values from ${label(file)}...`);
     const fileId = fileIdentifier(file);
     if (!fileId) throw new Error("The selected IFC has no file ID.");
     const downloadInfo = await request(`/files/fs/${encodeURIComponent(fileId)}/downloadurl`);
@@ -198,10 +201,10 @@ async function loadProducts() {
   } catch (error) { status(`Could not read the IFC: ${error.message}`, true); }
 }
 $("refreshButton").addEventListener("click", loadCwas);
-$("cwaSelect").addEventListener("change", loadIfcs);
-$("ifcSelect").addEventListener("change", loadProducts);
-$("assemblySelect").addEventListener("change", showMarks);
-$("markSelect").addEventListener("change", () => { $("saveFabricator").disabled = !$("markSelect").value; });
+$("cwaSelect").addEventListener("change", loadIfcFiles);
+$("ifcSelect").addEventListener("change", loadAssemblyNames);
+$("assemblySelect").addEventListener("change", loadAssemblyMarks);
+$("markSelect").addEventListener("change", loadFabricator);
 $("saveFabricator").addEventListener("click", saveFabricator);
 (async () => {
   try {

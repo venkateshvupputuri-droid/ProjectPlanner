@@ -97,10 +97,14 @@ async function loadProducts() {
   if (!file) return;
   try {
     status(`Reading product names from ${label(file)}...`);
-    let text;
-    const url = file.downloadUrl || file.downloadURL || file.url;
-    if (url) { const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } }); if (response.ok) text = await response.text(); }
-    if (!text) text = await request(`/files/${encodeURIComponent(file.fileId || identifier(file))}/download`, true);
+    const fileId = file.fileId || file.id;
+    if (!fileId) throw new Error("The selected IFC has no file ID.");
+    const downloadInfo = await request(`/files/fs/${encodeURIComponent(fileId)}/downloadurl`);
+    const downloadUrl = downloadInfo?.url || downloadInfo?.data?.url;
+    if (!downloadUrl) throw new Error("Trimble did not return a download URL.");
+    const response = await fetch(downloadUrl);
+    if (!response.ok) throw new Error(`File download failed (${response.status}).`);
+    const text = await response.text();
     const names = productNames(text);
     options("productSelect", names.length ? "Select product name..." : "No product names found", names, item => item, item => item);
     status(names.length ? `${names.length} product name${names.length === 1 ? "" : "s"} found.` : "No product names were found in this IFC.", !names.length);

@@ -11,3 +11,13 @@ A read-only Trimble Connect **Project** extension. It adds **Project Planner** t
 5. Enable Project Planner and approve the access-token permission on first use.
 
 The extension does not modify Trimble files or the existing Erection Sequence Planner extension.
+
+## Fabrication database
+
+The frontend extracts `ASSEMBLY_NAME` groups and assembly/cast unit marks from the selected IFC. Fabricator assignments are saved by the API in PostgreSQL database `fabricationdata`.
+
+1. Create the database and table with `psql -f schema.sql`.
+2. Install the API dependencies with `npm install`.
+3. Copy `.env.example` to `.env` and set `DATABASE_URL` to the `fabricationdata` database.
+4. Start the API with `npm start`.
+5. Set `window.FABRICATION_API_URL` before `app.js` loads to the deployed API URL. GitHub Pages cannot host the API or PostgreSQL database.

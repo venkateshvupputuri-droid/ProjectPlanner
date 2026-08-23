@@ -1,6 +1,7 @@
 const COMPLETED_PATH = "/Completed";
 const ORIGINS = ["https://app.connect.trimble.com","https://app21.connect.trimble.com","https://app31.connect.trimble.com","https://app32.connect.trimble.com","https://app22.connect.trimble.com"];
 let workspace, token, project, origin, cwas = [], ifcs = [], projectEntries = [];
+const FABRICATION_API = window.FABRICATION_API_URL || "";
 const $ = id => document.getElementById(id);
 const status = (text, error = false) => { $("status").textContent = text; $("status").classList.toggle("error", error); };
 const projectId = () => project?.id || project?.projectId || project?.ProjectId;
@@ -9,10 +10,85 @@ const identifier = item => item.id || item.fileId || item.versionId || item.uuid
 const fileIdentifier = item => item.fileId || item.id || item.versionId || item.uuid;
 const isFolder = item => item.directory === true || item.type === "folder" || item.type === "Folder" || item.isFolder === true || item.folder === true;
 const isIfc = item => /\.ifc$/i.test(label(item));
+let assemblies = [];
 function options(id, placeholder, values, value = identifier, text = label) {
   const select = $(id);
   select.replaceChildren(new Option(placeholder, ""), ...values.map(item => new Option(text(item), value(item))));
   select.disabled = values.length === 0;
+}
+function splitIfcArguments(value) {
+  const result = []; let current = ""; let depth = 0; let quoted = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === "'" && value[index + 1] === "'") { current += "''"; index += 1; continue; }
+    if (character === "'") quoted = !quoted;
+    if (!quoted && character === "(") depth += 1;
+    if (!quoted && character === ")") depth -= 1;
+    if (character === "," && !quoted && depth === 0) { result.push(current.trim()); current = ""; }
+    else current += character;
+  }
+  result.push(current.trim());
+  return result;
+}
+function ifcString(value) {
+  const match = String(value || "").match(/^'((?:''|[^'])*)'$/);
+  return match ? match[1].replace(/''/g, "'").trim() : "";
+}
+function extractIfcData(text) {
+  const entities = new Map(); const properties = new Map(); const relations = [];
+  const entityPattern = /#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(([^;]*?)\)\s*;/gis;
+  let match;
+  while ((match = entityPattern.exec(text))) entities.set(`#${match[1]}`, { type: match[2].toUpperCase(), args: splitIfcArguments(match[3]) });
+  for (const [id, entity] of entities) {
+    if (entity.type === "IFCPROPERTYSINGLEVALUE") {
+      const name = ifcString(entity.args[0]);
+      const valueMatch = entity.args.slice(2).join(",").match(/IFC(?:LABEL|TEXT|IDENTIFIER|INTEGER|REAL)\s*\(\s*'((?:''|[^'])*)'/i);
+      if (name && valueMatch) properties.set(id, { name: name.toUpperCase(), value: valueMatch[1].replace(/''/g, "'").trim() });
+    }
+    if (entity.type === "IFCRELDEFINESBYPROPERTIES") {
+      const references = entity.args.filter(argument => /^#\d+$/.test(argument));
+      const propertySet = references.at(-1); const propertyEntity = entities.get(propertySet);
+      if (propertyEntity?.type === "IFCPROPERTYSET") relations.push({ objects: references.slice(0, -1), properties: propertyEntity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0])) });
+    }
+  }
+  const valuesByObject = new Map();
+  for (const relation of relations) for (const objectId of relation.objects) valuesByObject.set(objectId, Object.fromEntries(relation.properties.map(id => [properties.get(id)?.name, properties.get(id)?.value]).filter(([name]) => name)));
+  const result = [];
+  for (const [id, entity] of entities) {
+    const values = valuesByObject.get(id) || {}; const name = ifcString(entity.args[2]);
+    const assemblyName = values.ASSEMBLY_NAME || values.ASSEMBLYNAME || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
+    const mark = values.CAST_UNIT_MARK || values.CASTUNITMARK || values.ASSEMBLY_MARK || values.ASSEMBLYMARK || values.MARK || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
+    if (assemblyName && mark) result.push({ id, type: entity.type, assemblyName, mark });
+  }
+  const grouped = new Map();
+  for (const item of result) { if (!grouped.has(item.assemblyName)) grouped.set(item.assemblyName, new Set()); grouped.get(item.assemblyName).add(item.mark); }
+  return [...grouped].map(([assemblyName, marks]) => ({ assemblyName, marks: [...marks].sort((a, b) => a.localeCompare(b)) })).sort((a, b) => a.assemblyName.localeCompare(b.assemblyName));
+}
+function updateAssemblyControls() {
+  options("assemblySelect", assemblies.length ? "Select ASSEMBLY_NAME..." : "No ASSEMBLY_NAME values found", assemblies, item => item.assemblyName, item => item.assemblyName);
+  options("markSelect", "Select assembly/cast unit mark...", []);
+  $("fabricatorName").value = "";
+  $("fabricatorName").disabled = true;
+  $("saveFabricator").disabled = true;
+}
+function showMarks() {
+  const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
+  options("markSelect", assembly?.marks.length ? "Select assembly/cast unit mark..." : "No marks found", assembly?.marks || [], item => item, item => item);
+  $("fabricatorName").value = "";
+  $("fabricatorName").disabled = !assembly?.marks.length;
+  $("saveFabricator").disabled = !assembly?.marks.length || !$("markSelect").value;
+}
+async function saveFabricator() {
+  const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
+  const assemblyName = $("assemblySelect").value; const mark = $("markSelect").value; const fabricatorName = $("fabricatorName").value.trim();
+  if (!file || !assemblyName || !mark || !fabricatorName) return status("Select an assembly and mark, then enter a fabricator name.", true);
+  if (!FABRICATION_API) return status("Fabrication API is not configured. Set FABRICATION_API_URL before saving.", true);
+  try {
+    status("Saving fabricator...");
+    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-records`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: projectId(), projectName: project.name, fileId: file.fileId || file.id, fileName: label(file), assemblyName, mark, fabricatorName }) });
+    if (!response.ok) throw new Error(`Save failed (${response.status}).`);
+    status("Fabricator saved.");
+  } catch (error) { status(`Could not save fabricator: ${error.message}`, true); }
 }
 function eventHandler(event, args) {
   if (event === "extension.accessToken" && typeof args?.data === "string") { token = args.data; loadCwas(); }
@@ -106,14 +182,17 @@ async function loadProducts() {
     const response = await fetch(downloadUrl);
     if (!response.ok) throw new Error(`File download failed (${response.status}).`);
     const text = await response.text();
-    const names = productNames(text);
-    options("productSelect", names.length ? "Select product name..." : "No product names found", names, item => item, item => item);
-    status(names.length ? `${names.length} product name${names.length === 1 ? "" : "s"} found.` : "No product names were found in this IFC.", !names.length);
+    assemblies = extractIfcData(text);
+    updateAssemblyControls();
+    status(assemblies.length ? `${assemblies.length} ASSEMBLY_NAME group${assemblies.length === 1 ? "" : "s"} found.` : "No ASSEMBLY_NAME values were found in this IFC.", !assemblies.length);
   } catch (error) { status(`Could not read the IFC: ${error.message}`, true); }
 }
 $("refreshButton").addEventListener("click", loadCwas);
 $("cwaSelect").addEventListener("change", loadIfcs);
 $("ifcSelect").addEventListener("change", loadProducts);
+$("assemblySelect").addEventListener("change", showMarks);
+$("markSelect").addEventListener("change", () => { $("saveFabricator").disabled = !$("markSelect").value; });
+$("saveFabricator").addEventListener("click", saveFabricator);
 (async () => {
   try {
     workspace = await TrimbleConnectWorkspace.connect(window.parent, eventHandler, 30000);

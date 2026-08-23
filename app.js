@@ -1,10 +1,11 @@
 const COMPLETED_PATH = "/Completed";
 const ORIGINS = ["https://app.connect.trimble.com","https://app21.connect.trimble.com","https://app31.connect.trimble.com","https://app32.connect.trimble.com","https://app22.connect.trimble.com"];
-let workspace, token, project, origin, cwas = [], ifcs = [];
+let workspace, token, project, origin, cwas = [], ifcs = [], projectEntries = [];
 const $ = id => document.getElementById(id);
 const status = (text, error = false) => { $("status").textContent = text; $("status").classList.toggle("error", error); };
 const projectId = () => project?.id || project?.projectId || project?.ProjectId;
 const label = item => item.name || item.fileName || item.displayName || "Unnamed";
+const displayFileName = item => label(item).replace(/\.ifc$/i, ".str");
 const identifier = item => item.id || item.fileId || item.versionId || item.uuid;
 const isFolder = item => item.type === "folder" || item.type === "Folder" || item.isFolder === true || item.folder === true;
 const isIfc = item => /\.ifc$/i.test(label(item));
@@ -34,27 +35,23 @@ function records(data) {
   if (Array.isArray(data)) return data;
   return data?.items || data?.files || data?.folders || data?.data || [];
 }
-function nextPage(data, path) {
-  const next = data?.next || data?.nextPage || data?.nextPageToken || data?.continuationToken || data?.links?.next || data?.pagination?.next;
-  if (!next) return null;
-  if (typeof next !== "string") return null;
-  if (/^https?:\/\//i.test(next)) {
-    const url = new URL(next);
-    return `${url.pathname}${url.search}`.replace(/^\/tc\/api\/2\.0/, "");
-  }
-  return next.startsWith("/") ? next : `${path.split("?")[0]}?page=${encodeURIComponent(next)}`;
+function entryPath(item) {
+  return String(item.path || item.fullPath || item.parentPath || "").replace(/\\/g, "/").replace(/\/$/, "");
+}
+function isFolderEntry(item) {
+  return String(item.type || "").toLowerCase() === "folder" || isFolder(item);
+}
+function isDirectChild(item, parentPath) {
+  const path = entryPath(item);
+  if (!path) return false;
+  const normalizedParent = parentPath.replace(/\/$/, "");
+  if (path === normalizedParent && item.parentPath) return true;
+  const relative = path.startsWith(`${normalizedParent}/`) ? path.slice(normalizedParent.length + 1) : "";
+  return relative && !relative.includes("/");
 }
 async function list(path) {
-  const result = [];
-  const seen = new Set();
-  let endpoint = `/projects/${encodeURIComponent(projectId())}/files?path=${encodeURIComponent(path)}`;
-  while (endpoint && !seen.has(endpoint)) {
-    seen.add(endpoint);
-    const data = await request(endpoint);
-    result.push(...records(data));
-    endpoint = nextPage(data, endpoint);
-  }
-  return result;
+  if (!projectEntries.length) projectEntries = records(await request(`/sync/${encodeURIComponent(projectId())}?excludeVersion=true`));
+  return projectEntries.filter(item => isDirectChild(item, path));
 }
 async function loadCwas() {
   try {
@@ -71,9 +68,9 @@ async function loadIfcs() {
   if (!cwa) return;
   try {
     status(`Loading IFC files for ${label(cwa)}...`);
-    const cwaPath = cwa.path || cwa.fullPath || `${COMPLETED_PATH}/${label(cwa)}`;
+    const cwaPath = cwa.fullPath || (cwa.path && cwa.path !== COMPLETED_PATH ? cwa.path : `${COMPLETED_PATH}/${label(cwa)}`);
     ifcs = (await list(cwaPath)).filter(isIfc).sort((a,b) => label(a).localeCompare(label(b)));
-    options("ifcSelect", ifcs.length ? "Select IFC file..." : "No IFC files found", ifcs);
+    options("ifcSelect", ifcs.length ? "Select IFC file..." : "No IFC files found", ifcs, identifier, displayFileName);
     options("productSelect", "Select an IFC file first", []);
     status(ifcs.length ? "Choose an IFC file." : `No IFC files were found in ${label(cwa)}.`, !ifcs.length);
   } catch (error) { status(error.message, true); }

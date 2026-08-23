@@ -30,19 +30,37 @@ async function request(path, asText = false) {
   }
   throw new Error(`Trimble request failed (${messages.join(", ")}).`);
 }
-function records(data) { return Array.isArray(data) ? data : data.items || data.files || data.data || []; }
-async function list(path) {
-  let last;
-  for (const endpoint of [`/projects/${encodeURIComponent(projectId())}/files?path=${encodeURIComponent(path)}`, `/folders/${encodeURIComponent(projectId())}/items?path=${encodeURIComponent(path)}`]) {
-    try { return records(await request(endpoint)); } catch (error) { last = error; }
+function records(data) {
+  if (Array.isArray(data)) return data;
+  return data?.items || data?.files || data?.folders || data?.data || [];
+}
+function nextPage(data, path) {
+  const next = data?.next || data?.nextPage || data?.nextPageToken || data?.continuationToken || data?.links?.next || data?.pagination?.next;
+  if (!next) return null;
+  if (typeof next !== "string") return null;
+  if (/^https?:\/\//i.test(next)) {
+    const url = new URL(next);
+    return `${url.pathname}${url.search}`.replace(/^\/tc\/api\/2\.0/, "");
   }
-  throw last;
+  return next.startsWith("/") ? next : `${path.split("?")[0]}?page=${encodeURIComponent(next)}`;
+}
+async function list(path) {
+  const result = [];
+  const seen = new Set();
+  let endpoint = `/projects/${encodeURIComponent(projectId())}/files?path=${encodeURIComponent(path)}`;
+  while (endpoint && !seen.has(endpoint)) {
+    seen.add(endpoint);
+    const data = await request(endpoint);
+    result.push(...records(data));
+    endpoint = nextPage(data, endpoint);
+  }
+  return result;
 }
 async function loadCwas() {
   try {
-    status("Loading CWA folders from Completed…");
+    status("Loading CWA folders from Completed...");
     cwas = (await list(COMPLETED_PATH)).filter(isFolder).sort((a,b) => label(a).localeCompare(label(b)));
-    options("cwaSelect", cwas.length ? "Select CWA…" : "No folders found in Completed", cwas);
+    options("cwaSelect", cwas.length ? "Select CWA..." : "No folders found in Completed", cwas);
     options("ifcSelect", "Select a CWA folder first", []);
     options("productSelect", "Select an IFC file first", []);
     status(cwas.length ? "Choose a CWA folder." : "No folders were found directly inside /Completed.", !cwas.length);
@@ -52,9 +70,10 @@ async function loadIfcs() {
   const cwa = cwas.find(item => identifier(item) === $("cwaSelect").value);
   if (!cwa) return;
   try {
-    status(`Loading IFC files for ${label(cwa)}…`);
-    ifcs = (await list(`${COMPLETED_PATH}/${label(cwa)}`)).filter(isIfc).sort((a,b) => label(a).localeCompare(label(b)));
-    options("ifcSelect", ifcs.length ? "Select IFC file…" : "No IFC files found", ifcs);
+    status(`Loading IFC files for ${label(cwa)}...`);
+    const cwaPath = cwa.path || cwa.fullPath || `${COMPLETED_PATH}/${label(cwa)}`;
+    ifcs = (await list(cwaPath)).filter(isIfc).sort((a,b) => label(a).localeCompare(label(b)));
+    options("ifcSelect", ifcs.length ? "Select IFC file..." : "No IFC files found", ifcs);
     options("productSelect", "Select an IFC file first", []);
     status(ifcs.length ? "Choose an IFC file." : `No IFC files were found in ${label(cwa)}.`, !ifcs.length);
   } catch (error) { status(error.message, true); }
@@ -70,13 +89,13 @@ async function loadProducts() {
   const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
   if (!file) return;
   try {
-    status(`Reading product names from ${label(file)}…`);
+    status(`Reading product names from ${label(file)}...`);
     let text;
     const url = file.downloadUrl || file.downloadURL || file.url;
     if (url) { const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } }); if (response.ok) text = await response.text(); }
     if (!text) text = await request(`/projects/${encodeURIComponent(projectId())}/files/${encodeURIComponent(identifier(file))}/download`, true);
     const names = productNames(text);
-    options("productSelect", names.length ? "Select product name…" : "No product names found", names, item => item, item => item);
+    options("productSelect", names.length ? "Select product name..." : "No product names found", names, item => item, item => item);
     status(names.length ? `${names.length} product name${names.length === 1 ? "" : "s"} found.` : "No product names were found in this IFC.", !names.length);
   } catch (error) { status(`Could not read the IFC: ${error.message}`, true); }
 }

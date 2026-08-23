@@ -7,7 +7,7 @@ const projectId = () => project?.id || project?.projectId || project?.ProjectId;
 const label = item => item.name || item.fileName || item.displayName || "Unnamed";
 const displayFileName = item => label(item).replace(/\.ifc$/i, ".str");
 const identifier = item => item.id || item.fileId || item.versionId || item.uuid;
-const isFolder = item => item.type === "folder" || item.type === "Folder" || item.isFolder === true || item.folder === true;
+const isFolder = item => item.directory === true || item.type === "folder" || item.type === "Folder" || item.isFolder === true || item.folder === true;
 const isIfc = item => /\.ifc$/i.test(label(item));
 function options(id, placeholder, values, value = identifier, text = label) {
   const select = $(id);
@@ -33,25 +33,28 @@ async function request(path, asText = false) {
 }
 function records(data) {
   if (Array.isArray(data)) return data;
-  return data?.items || data?.files || data?.folders || data?.data || [];
+  return data?.items || data?.files || data?.folders || (Array.isArray(data?.data) ? data.data : []) || [];
 }
 function entryPath(item) {
-  return String(item.path || item.fullPath || item.parentPath || "").replace(/\\/g, "/").replace(/\/$/, "");
+  if (typeof item.path === "string") return item.path.replace(/\\/g, "/").replace(/\/$/, "");
+  if (Array.isArray(item.path)) return `/${item.path.map(part => part.name).join("/")}`.replace(/\/$/, "");
+  return String(item.fullPath || item.parentPath || "").replace(/\\/g, "/").replace(/\/$/, "");
 }
 function isFolderEntry(item) {
   return String(item.type || "").toLowerCase() === "folder" || isFolder(item);
 }
-function isDirectChild(item, parentPath) {
-  const path = entryPath(item);
-  if (!path) return false;
-  const normalizedParent = parentPath.replace(/\/$/, "");
-  if (path === normalizedParent && item.parentPath) return true;
-  const relative = path.startsWith(`${normalizedParent}/`) ? path.slice(normalizedParent.length + 1) : "";
-  return relative && !relative.includes("/");
+function parentIdentifier(item) {
+  return item.activeParentId || item.parentId || item.parentFolderId;
+}
+function findFolder(path) {
+  const name = path.split("/").filter(Boolean).pop();
+  return projectEntries.find(item => isFolder(item) && (label(item) === name || entryPath(item) === path));
 }
 async function list(path) {
   if (!projectEntries.length) projectEntries = records(await request(`/sync/${encodeURIComponent(projectId())}?excludeVersion=true`));
-  return projectEntries.filter(item => isDirectChild(item, path));
+  const parent = findFolder(path);
+  if (!parent) return [];
+  return projectEntries.filter(item => String(parentIdentifier(item)) === String(identifier(parent)));
 }
 async function loadCwas() {
   try {
@@ -68,7 +71,7 @@ async function loadIfcs() {
   if (!cwa) return;
   try {
     status(`Loading IFC files for ${label(cwa)}...`);
-    const cwaPath = cwa.fullPath || (cwa.path && cwa.path !== COMPLETED_PATH ? cwa.path : `${COMPLETED_PATH}/${label(cwa)}`);
+    const cwaPath = entryPath(cwa) || `${COMPLETED_PATH}/${label(cwa)}`;
     ifcs = (await list(cwaPath)).filter(isIfc).sort((a,b) => label(a).localeCompare(label(b)));
     options("ifcSelect", ifcs.length ? "Select IFC file..." : "No IFC files found", ifcs, identifier, displayFileName);
     options("productSelect", "Select an IFC file first", []);

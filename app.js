@@ -5,7 +5,6 @@ const $ = id => document.getElementById(id);
 const status = (text, error = false) => { $("status").textContent = text; $("status").classList.toggle("error", error); };
 const projectId = () => project?.id || project?.projectId || project?.ProjectId;
 const label = item => item.name || item.fileName || item.displayName || "Unnamed";
-const displayFileName = item => label(item).replace(/\.ifc$/i, ".str");
 const identifier = item => item.id || item.fileId || item.versionId || item.uuid;
 const isFolder = item => item.directory === true || item.type === "folder" || item.type === "Folder" || item.isFolder === true || item.folder === true;
 const isIfc = item => /\.ifc$/i.test(label(item));
@@ -81,7 +80,7 @@ async function loadIfcs() {
     status(`Loading IFC files for ${label(cwa)}...`);
     const cwaPath = entryPath(cwa) || `${COMPLETED_PATH}/${label(cwa)}`;
     ifcs = (await list(cwaPath)).filter(isIfc).sort((a,b) => label(a).localeCompare(label(b)));
-    options("ifcSelect", ifcs.length ? "Select IFC file..." : "No IFC files found", ifcs, identifier, displayFileName);
+    options("ifcSelect", ifcs.length ? "Select IFC file..." : "No IFC files found", ifcs);
     options("productSelect", "Select an IFC file first", []);
     status(ifcs.length ? "Choose an IFC file." : `No IFC files were found in ${label(cwa)}.`, !ifcs.length);
   } catch (error) { status(error.message, true); }
@@ -101,7 +100,7 @@ async function loadProducts() {
     let text;
     const url = file.downloadUrl || file.downloadURL || file.url;
     if (url) { const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } }); if (response.ok) text = await response.text(); }
-    if (!text) text = await request(`/projects/${encodeURIComponent(projectId())}/files/${encodeURIComponent(identifier(file))}/download`, true);
+    if (!text) text = await request(`/files/${encodeURIComponent(file.fileId || identifier(file))}/download`, true);
     const names = productNames(text);
     options("productSelect", names.length ? "Select product name..." : "No product names found", names, item => item, item => item);
     status(names.length ? `${names.length} product name${names.length === 1 ? "" : "s"} found.` : "No product names were found in this IFC.", !names.length);

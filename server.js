@@ -9,6 +9,15 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "https://venkateshvupputu
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json({ limit: "64kb" }));
 app.get("/health", (_request, response) => response.json({ ok: true, database: "fabricationdata" }));
+app.get("/fabricators", async (_request, response) => {
+  try {
+    const result = await pool.query("SELECT id, name FROM fabricators WHERE active = TRUE ORDER BY name");
+    response.json(result.rows);
+  } catch (error) {
+    console.error(error);
+    response.status(500).json({ error: "Could not read fabricators." });
+  }
+});
 app.put("/fabrication-records", async (request, response) => {
   const { projectId, projectName, fileId, fileName, assemblyName, mark, fabricatorName } = request.body || {};
   if (![projectId, fileId, fileName, assemblyName, mark, fabricatorName].every(value => typeof value === "string" && value.trim())) return response.status(400).json({ error: "All fabrication fields are required." });

@@ -17,3 +17,10 @@ CREATE TABLE IF NOT EXISTS fabrication_records (
 );
 
 CREATE INDEX IF NOT EXISTS fabrication_records_project_idx ON fabrication_records (project_id);
+
+CREATE TABLE IF NOT EXISTS fabricators (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

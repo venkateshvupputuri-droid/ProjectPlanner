@@ -17,7 +17,7 @@
     <section class="card"><h2>2. IFC file</h2><p>Choose an IFC file from the selected CWA folder.</p><label for="ifcSelect">IFC file name</label><select id="ifcSelect" disabled><option>Select a CWA folder first</option></select></section>
     <section class="card"><h2>3. ASSEMBLY_NAME</h2><p>Choose an ASSEMBLY_NAME group found in the selected IFC.</p><label for="assemblySelect">ASSEMBLY_NAME</label><select id="assemblySelect" disabled><option>Select an IFC file first</option></select></section>
     <section class="card"><h2>4. Assembly/Cast unit mark</h2><p>Choose a mark from the selected ASSEMBLY_NAME group.</p><label for="markSelect">Assembly/Cast unit mark</label><select id="markSelect" disabled><option>Select an ASSEMBLY_NAME first</option></select></section>
-    <section class="card"><h2>5. Fabricator</h2><label for="fabricatorName">Fabricator name</label><input id="fabricatorName" type="text" placeholder="Enter fabricator name" disabled><button id="saveFabricator" type="button" disabled>Save fabricator</button><p class="hint">Fabricator assignments are stored in the fabricationdata database.</p></section>
+    <section class="card"><h2>5. Fabricator Name</h2><label for="fabricatorName">Fabricator name</label><select id="fabricatorName" disabled><option>Select an assembly/cast unit mark first</option></select><button id="saveFabricator" type="button" disabled>Save fabricator</button><p class="hint">Fabricator names are loaded from the fabricationdata database.</p></section>
     <p id="status" role="status">Connecting�</p>
   </main>
   <script src="app.js"></script>

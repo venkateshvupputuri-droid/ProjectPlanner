@@ -46,9 +46,9 @@ function extractIfcData(text) {
       if (name && valueMatch) properties.set(id, { name: name.toUpperCase(), value: valueMatch[1].replace(/''/g, "'").trim() });
     }
     if (entity.type === "IFCRELDEFINESBYPROPERTIES") {
-      const references = entity.args.filter(argument => /^#\d+$/.test(argument));
-      const propertySet = references.at(-1); const propertyEntity = entities.get(propertySet);
-      if (propertyEntity?.type === "IFCPROPERTYSET") relations.push({ objects: references.slice(0, -1), properties: propertyEntity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0])) });
+      const propertySet = [...String(entity.args.at(-1)).matchAll(/#\d+/g)].map(item => item[0]).at(-1); const propertyEntity = entities.get(propertySet);
+      const objects = [...String(entity.args[4] || "").matchAll(/#\d+/g)].map(item => item[0]);
+      if (propertyEntity?.type === "IFCPROPERTYSET") relations.push({ objects, properties: propertyEntity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0])) });
     }
   }
   const valuesByObject = new Map();
@@ -77,10 +77,20 @@ function showMarks() {
   $("fabricatorName").value = "";
   $("fabricatorName").disabled = !assembly?.marks.length;
   $("saveFabricator").disabled = !assembly?.marks.length || !$("markSelect").value;
+  loadFabricators();
+}
+async function loadFabricators() {
+  if (!FABRICATION_API) return;
+  try {
+    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabricators`);
+    if (!response.ok) throw new Error(`Fabricator lookup failed (${response.status}).`);
+    const names = await response.json();
+    options("fabricatorName", names.length ? "Select fabricator..." : "No fabricators found", names, item => item.name, item => item.name);
+  } catch (error) { status(`Could not load fabricators: ${error.message}`, true); }
 }
 async function saveFabricator() {
   const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
-  const assemblyName = $("assemblySelect").value; const mark = $("markSelect").value; const fabricatorName = $("fabricatorName").value.trim();
+  const assemblyName = $("assemblySelect").value; const mark = $("markSelect").value; const fabricatorName = $("fabricatorName").value;
   if (!file || !assemblyName || !mark || !fabricatorName) return status("Select an assembly and mark, then enter a fabricator name.", true);
   if (!FABRICATION_API) return status("Fabrication API is not configured. Set FABRICATION_API_URL before saving.", true);
   try {

@@ -44,17 +44,25 @@ function isFolderEntry(item) {
   return String(item.type || "").toLowerCase() === "folder" || isFolder(item);
 }
 function parentIdentifier(item) {
-  return item.activeParentId || item.parentId || item.parentFolderId;
+  return [item.activeParentId, item.parentId, item.parentFolderId].filter(Boolean).map(String);
 }
 function findFolder(path) {
   const name = path.split("/").filter(Boolean).pop();
-  return projectEntries.find(item => isFolder(item) && (label(item) === name || entryPath(item) === path));
+  return projectEntries.find(item => isFolder(item) && (label(item) === name || entryPath(item).toLowerCase() === path.toLowerCase()));
+}
+function isChildOf(item, parent, parentPath) {
+  const parentIds = [parent.id, parent.fileId, parent.folderId].filter(Boolean).map(String);
+  if (parentIdentifier(item).some(id => parentIds.includes(id))) return true;
+  const itemPath = entryPath(item).toLowerCase();
+  const normalizedParent = parentPath.replace(/\/$/, "").toLowerCase();
+  if (!itemPath.startsWith(`${normalizedParent}/`)) return false;
+  return !itemPath.slice(normalizedParent.length + 1).includes("/");
 }
 async function list(path) {
   if (!projectEntries.length) projectEntries = records(await request(`/sync/${encodeURIComponent(projectId())}?excludeVersion=true`));
   const parent = findFolder(path);
   if (!parent) return [];
-  return projectEntries.filter(item => String(parentIdentifier(item)) === String(identifier(parent)));
+  return projectEntries.filter(item => item !== parent && isChildOf(item, parent, path));
 }
 async function loadCwas() {
   try {

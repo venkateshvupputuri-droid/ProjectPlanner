@@ -37,7 +37,11 @@ app.put("/fabrication-records", async (request, response) => {
 });
 app.get("/fabrication-records", async (request, response) => {
   try {
-    const result = await pool.query("SELECT * FROM fabrication_records WHERE project_id = $1 ORDER BY assembly_name, mark", [String(request.query.projectId || "")]);
+    const values = [String(request.query.projectId || "")];
+    let query = "SELECT * FROM fabrication_records WHERE project_id = $1";
+    if (request.query.fileId) { values.push(String(request.query.fileId)); query += " AND file_id = $2"; }
+    query += " ORDER BY plan_no, sequence_no, assembly_name, mark";
+    const result = await pool.query(query, values);
     response.json(result.rows);
   } catch (error) {
     console.error(error);

@@ -11,7 +11,7 @@ const entryIdentifiers = item => [item.id, item.fileId, item.folderId, item.uuid
 const fileIdentifier = item => item.fileId || item.id || item.versionId || item.uuid;
 const isFolder = item => item.directory === true || item.type === "folder" || item.type === "Folder" || item.isFolder === true || item.folder === true;
 const isIfc = item => /\.ifc$/i.test(label(item));
-let assemblies = [], selectedMark = "", selectedSequence = 0;
+let assemblies = [], selectedMark = "", selectedPlan = 0, selectedSequence = 0, savedAssignments = [];
 function options(id, placeholder, values, value = identifier, text = label) {
   const select = $(id);
   select.replaceChildren(new Option(placeholder, ""), ...values.map(item => new Option(text(item), value(item))));
@@ -78,8 +78,9 @@ function updateAssemblyControls() {
 async function loadAssemblyMarks() {
   const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
   const marks = assembly?.marks || [];
-  $("markRows").innerHTML = marks.length ? marks.map((mark, index) => `<tr><td>${mark}</td><td class=\"sequence\">1-${index + 1}</td><td class=\"assigned-fabricator\">Not assigned</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-sequence=\"${index + 1}\">Choose</button></td></tr>`).join("") : "<tr><td colspan=\"4\">No marks found</td></tr>";
-  document.querySelectorAll(".choose-mark").forEach(button => button.addEventListener("click", () => { selectedMark = decodeURIComponent(button.dataset.mark); selectedSequence = Number(button.dataset.sequence); loadFabricator(); }));
+  await loadAssignments();
+  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => item.mark === mark); const sequence = saved?.plan_no && saved?.sequence_no ? `${saved.plan_no}-${saved.sequence_no}` : "Not assigned"; return `<tr><td>${mark}</td><td class=\"sequence\">${sequence}</td><td class=\"assigned-fabricator\">${saved?.fabricator_name || "Not assigned"}</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-plan=\"${saved?.plan_no || 0}\" data-sequence=\"${saved?.sequence_no || 0}\">Choose</button></td></tr>`; }).join("") : "<tr><td colspan=\"4\">No marks found</td></tr>";
+  document.querySelectorAll(".choose-mark").forEach(button => button.addEventListener("click", () => { selectedMark = decodeURIComponent(button.dataset.mark); selectedPlan = Number(button.dataset.plan); selectedSequence = Number(button.dataset.sequence); loadFabricator(); }));
   $("fabricatorName").value = "";
   $("fabricatorName").disabled = !assembly?.marks.length;
   $("saveFabricator").disabled = true;
@@ -94,6 +95,17 @@ async function loadFabricator() {
     $("saveFabricator").disabled = !selectedMark || !names.length;
   } catch (error) { status(`Could not load fabricators: ${error.message}`, true); }
 }
+async function loadAssignments() {
+  savedAssignments = [];
+  const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
+  if (!FABRICATION_API || !file) return;
+  const query = new URLSearchParams({ projectId: projectId(), fileId: file.fileId || file.id });
+  try {
+    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-records?${query}`);
+    if (!response.ok) throw new Error(`Sequence lookup failed (${response.status}).`);
+    savedAssignments = await response.json();
+  } catch (error) { status(`Could not load SQL sequence numbers: ${error.message}`, true); }
+}
 async function saveFabricator() {
   const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
   const assemblyName = $("assemblySelect").value; const mark = selectedMark; const fabricatorName = $("fabricatorName").value;
@@ -101,7 +113,7 @@ async function saveFabricator() {
   if (!FABRICATION_API) return status("Fabrication API is not configured. Set FABRICATION_API_URL before saving.", true);
   try {
     status("Saving fabricator...");
-    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-records`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: projectId(), projectName: project.name, fileId: file.fileId || file.id, fileName: label(file), assemblyName, mark, fabricatorName, planNo: 1, sequenceNo: selectedSequence }) });
+    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-records`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: projectId(), projectName: project.name, fileId: file.fileId || file.id, fileName: label(file), assemblyName, mark, fabricatorName, planNo: selectedPlan || 1, sequenceNo: selectedSequence || 1 }) });
     if (!response.ok) throw new Error(`Save failed (${response.status}).`);
     status("Fabricator saved.");
   } catch (error) { status(`Could not save fabricator: ${error.message}`, true); }

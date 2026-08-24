@@ -2,6 +2,7 @@ const COMPLETED_PATH = "/Completed";
 const ORIGINS = ["https://app.connect.trimble.com","https://app21.connect.trimble.com","https://app31.connect.trimble.com","https://app32.connect.trimble.com","https://app22.connect.trimble.com"];
 let workspace, token, project, origin, cwas = [], ifcs = [], projectEntries = [];
 const FABRICATION_API = window.FABRICATION_API_URL || "";
+const ERECTION_API = window.ERECTION_PLANNER_API_BASE || "https://venkateshvupputuri-droid.github.io/venkatesh/api";
 const $ = id => document.getElementById(id);
 const status = (text, error = false) => { $("status").textContent = text; $("status").classList.toggle("error", error); };
 const projectId = () => project?.id || project?.projectId || project?.ProjectId;
@@ -79,7 +80,7 @@ async function loadAssemblyMarks() {
   const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
   const marks = assembly?.marks || [];
   await loadAssignments();
-  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => item.mark === mark); const sequence = saved?.plan_no && saved?.sequence_no ? `${saved.plan_no}-${saved.sequence_no}` : "Not assigned"; return `<tr><td>${mark}</td><td class=\"sequence\">${sequence}</td><td class=\"assigned-fabricator\">${saved?.fabricator_name || "Not assigned"}</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-plan=\"${saved?.plan_no || 0}\" data-sequence=\"${saved?.sequence_no || 0}\">Choose</button></td></tr>`; }).join("") : "<tr><td colspan=\"4\">No marks found</td></tr>";
+  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); const sequence = saved?.sequenceCode || ""; return `<tr><td>${mark}</td><td class=\"sequence\">${sequence}</td><td class=\"assigned-fabricator\">${saved?.fabricator_name || "Not assigned"}</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-plan=\"${saved?.plan_no || 0}\" data-sequence=\"${saved?.sequence_no || 0}\">Choose</button></td></tr>`; }).join("") : "<tr><td colspan=\"4\">No marks found</td></tr>";
   document.querySelectorAll(".choose-mark").forEach(button => button.addEventListener("click", () => { selectedMark = decodeURIComponent(button.dataset.mark); selectedPlan = Number(button.dataset.plan); selectedSequence = Number(button.dataset.sequence); loadFabricator(); }));
   $("fabricatorName").value = "";
   $("fabricatorName").disabled = !assembly?.marks.length;
@@ -98,13 +99,20 @@ async function loadFabricator() {
 async function loadAssignments() {
   savedAssignments = [];
   const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
-  if (!FABRICATION_API || !file) return;
-  const query = new URLSearchParams({ projectId: projectId(), fileId: file.fileId || file.id });
+  if (!file) return;
+  const modelId = file.modelId || file.fileId || file.id || file.versionId;
   try {
-    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-records?${query}`);
-    if (!response.ok) throw new Error(`Sequence lookup failed (${response.status}).`);
-    savedAssignments = await response.json();
-  } catch (error) { status(`Could not load SQL sequence numbers: ${error.message}`, true); }
+    const base = ERECTION_API.replace(/\/$/, "");
+    const plansResponse = await fetch(`${base}/projects/${encodeURIComponent(projectId())}/models/${encodeURIComponent(modelId)}/plans`, { headers: { authorization: `Bearer ${token}` } });
+    if (!plansResponse.ok) throw new Error(`Erection plan lookup failed (${plansResponse.status}).`);
+    const plans = await plansResponse.json();
+    const rows = (await Promise.all(plans.map(async plan => {
+      const response = await fetch(`${base}/plans/${encodeURIComponent(plan.PlanId)}/assemblies`, { headers: { authorization: `Bearer ${token}` } });
+      if (!response.ok) throw new Error(`Assembly assignment lookup failed (${response.status}).`);
+      return (await response.json()).map(row => ({ ...row, plan_no: Number(plan.PlanNumber), sequence_no: Number(row.SequenceOrder), sequenceCode: row.SequenceCode || `${plan.PlanNumber}-${row.SequenceOrder}` }));
+    }))).flat();
+    savedAssignments = rows.filter(row => row.AssemblyMark || row.assemblyMark);
+  } catch (error) { status(`Could not load assigned sequence numbers: ${error.message}`, true); }
 }
 async function saveFabricator() {
   const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
@@ -113,7 +121,8 @@ async function saveFabricator() {
   if (!FABRICATION_API) return status("Fabrication API is not configured. Set FABRICATION_API_URL before saving.", true);
   try {
     status("Saving fabricator...");
-    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-records`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: projectId(), projectName: project.name, fileId: file.fileId || file.id, fileName: label(file), assemblyName, mark, fabricatorName, planNo: selectedPlan || 1, sequenceNo: selectedSequence || 1 }) });
+    if (!selectedPlan || !selectedSequence) return status("This mark has no assigned erection sequence and cannot be saved.", true);
+    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-records`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: projectId(), projectName: project.name, fileId: file.fileId || file.id, fileName: label(file), assemblyName, mark, fabricatorName, planNo: selectedPlan, sequenceNo: selectedSequence }) });
     if (!response.ok) throw new Error(`Save failed (${response.status}).`);
     status("Fabricator saved.");
   } catch (error) { status(`Could not save fabricator: ${error.message}`, true); }

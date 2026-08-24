@@ -1,7 +1,6 @@
 const COMPLETED_PATH = "/Completed";
 const ORIGINS = ["https://app.connect.trimble.com","https://app21.connect.trimble.com","https://app31.connect.trimble.com","https://app32.connect.trimble.com","https://app22.connect.trimble.com"];
 let workspace, token, project, origin, cwas = [], ifcs = [], projectEntries = [];
-const FABRICATION_API = window.FABRICATION_API_URL || "";
 const ERECTION_API = window.ERECTION_PLANNER_API_BASE || "https://followed-recruiting-album-noted.trycloudflare.com/api";
 const $ = id => document.getElementById(id);
 const status = (text, error = false) => { $("status").textContent = text; $("status").classList.toggle("error", error); };
@@ -71,37 +70,24 @@ function extractIfcData(text) {
 }
 function updateAssemblyControls() {
   options("assemblySelect", assemblies.length ? "Select ASSEMBLY_NAME..." : "No ASSEMBLY_NAME values found", assemblies, item => item.assemblyName, item => item.assemblyName);
-  $("markRows").innerHTML = "<tr><td colspan=\"4\">Select an ASSEMBLY_NAME first</td></tr>";
-  $("fabricatorName").value = "";
-  $("fabricatorName").disabled = true;
-  $("saveFabricator").disabled = true;
+  $("markRows").innerHTML = "<tr><td colspan=\"3\">Select an ASSEMBLY_NAME first</td></tr>";
 }
 async function loadAssemblyMarks() {
   const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
   const marks = assembly?.marks || [];
   await loadAssignments();
-  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); const sequence = saved?.sequenceCode || ""; return `<tr><td>${mark}</td><td class=\"sequence\">${sequence}</td><td class=\"assigned-fabricator\">${saved?.fabricator_name || "Not assigned"}</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-plan=\"${saved?.plan_no || 0}\" data-sequence=\"${saved?.sequence_no || 0}\">Choose</button></td></tr>`; }).join("") : "<tr><td colspan=\"4\">No marks found</td></tr>";
-  document.querySelectorAll(".choose-mark").forEach(button => button.addEventListener("click", () => { selectedMark = decodeURIComponent(button.dataset.mark); selectedPlan = Number(button.dataset.plan); selectedSequence = Number(button.dataset.sequence); loadFabricator(); }));
-  $("fabricatorName").value = "";
-  $("fabricatorName").disabled = !assembly?.marks.length;
-  $("saveFabricator").disabled = true;
-}
-async function loadFabricator() {
-  if (!FABRICATION_API) return;
-  try {
-    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabricators`);
-    if (!response.ok) throw new Error(`Fabricator lookup failed (${response.status}).`);
-    const names = await response.json();
-    options("fabricatorName", names.length ? "Select fabricator..." : "No fabricators found", names, item => item.name, item => item.name);
-    $("saveFabricator").disabled = !selectedMark || !names.length;
-  } catch (error) { status(`Could not load fabricators: ${error.message}`, true); }
+  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); const sequence = saved?.sequenceCode || ""; return `<tr><td>${mark}</td><td class=\"sequence\">${sequence}</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-plan=\"${saved?.plan_no || 0}\" data-sequence=\"${saved?.sequence_no || 0}\">Choose</button></td></tr>`; }).join("") : "<tr><td colspan=\"3\">No marks found</td></tr>";
+  document.querySelectorAll(".choose-mark").forEach(button => button.addEventListener("click", () => { selectedMark = decodeURIComponent(button.dataset.mark); selectedPlan = Number(button.dataset.plan); selectedSequence = Number(button.dataset.sequence); }));
 }
 async function loadAssignments() {
   savedAssignments = [];
   const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
   if (!file) return;
-  const modelId = file.modelId || file.fileId || file.id || file.versionId;
   try {
+    const loadedModels = await workspace.viewer.getModels("loaded");
+    const model = loadedModels.find(item => item.id === file.modelId || item.name === label(file) || item.name?.replace(/\.ifc$/i, "") === label(file).replace(/\.ifc$/i, ""));
+    const modelId = model?.id || file.modelId;
+    if (!modelId) throw new Error("The selected IFC is not loaded in the 3D Viewer.");
     const base = ERECTION_API.replace(/\/$/, "");
     const plansResponse = await fetch(`${base}/projects/${encodeURIComponent(projectId())}/models/${encodeURIComponent(modelId)}/plans`, { headers: { authorization: `Bearer ${token}` } });
     if (!plansResponse.ok) throw new Error(`Erection plan lookup failed (${plansResponse.status}).`);
@@ -113,19 +99,6 @@ async function loadAssignments() {
     }))).flat();
     savedAssignments = rows.filter(row => row.AssemblyMark || row.assemblyMark);
   } catch (error) { status(`Could not load assigned sequence numbers: ${error.message}`, true); }
-}
-async function saveFabricator() {
-  const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
-  const assemblyName = $("assemblySelect").value; const mark = selectedMark; const fabricatorName = $("fabricatorName").value;
-  if (!file || !assemblyName || !mark || !fabricatorName) return status("Select an assembly and mark, then enter a fabricator name.", true);
-  if (!FABRICATION_API) return status("Fabrication API is not configured. Set FABRICATION_API_URL before saving.", true);
-  try {
-    status("Saving fabricator...");
-    if (!selectedPlan || !selectedSequence) return status("This mark has no assigned erection sequence and cannot be saved.", true);
-    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-records`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: projectId(), projectName: project.name, fileId: file.fileId || file.id, fileName: label(file), assemblyName, mark, fabricatorName, planNo: selectedPlan, sequenceNo: selectedSequence }) });
-    if (!response.ok) throw new Error(`Save failed (${response.status}).`);
-    status("Fabricator saved.");
-  } catch (error) { status(`Could not save fabricator: ${error.message}`, true); }
 }
 function eventHandler(event, args) {
   if (event === "extension.accessToken" && typeof args?.data === "string") { token = args.data; loadCwas(); }
@@ -192,7 +165,6 @@ async function loadCwas() {
     options("cwaSelect", cwas.length ? "Select CWA..." : "No folders found in Completed", cwas);
     options("ifcSelect", "Select a CWA folder first", []);
     options("assemblySelect", "Select an IFC file first", []);
-    options("fabricatorName", "Select an assembly/cast unit mark first", []);
     status(cwas.length ? "Choose a CWA folder." : "No folders were found directly inside /Completed.", !cwas.length);
   } catch (error) { status(error.message, true); }
 }
@@ -205,7 +177,6 @@ async function loadIfcFiles() {
     ifcs = (await list(cwaPath, cwa)).filter(isIfc).sort((a,b) => label(a).localeCompare(label(b)));
     options("ifcSelect", ifcs.length ? "Select IFC file..." : "No IFC files found", ifcs);
     options("assemblySelect", "Select an IFC file first", []);
-    options("fabricatorName", "Select an assembly/cast unit mark first", []);
     status(ifcs.length ? "Choose an IFC file." : `No IFC files were found in ${label(cwa)}.`, !ifcs.length);
   } catch (error) { status(error.message, true); }
 }
@@ -238,8 +209,6 @@ $("refreshButton").addEventListener("click", loadCwas);
 $("cwaSelect").addEventListener("change", loadIfcFiles);
 $("ifcSelect").addEventListener("change", loadAssemblyNames);
 $("assemblySelect").addEventListener("change", loadAssemblyMarks);
-$("fabricatorName").addEventListener("change", () => { $("saveFabricator").disabled = !selectedMark || !$("fabricatorName").value; });
-$("saveFabricator").addEventListener("click", saveFabricator);
 (async () => {
   try {
     workspace = await TrimbleConnectWorkspace.connect(window.parent, eventHandler, 30000);

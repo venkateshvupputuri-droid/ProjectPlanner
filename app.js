@@ -76,7 +76,7 @@ async function loadAssemblyMarks() {
   const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
   const marks = assembly?.marks || [];
   await loadAssignments();
-  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); return `<tr><td>${mark}</td><td>${saved?.PlanId || ""}</td><td class=\"sequence\">${saved?.SequenceOrder || ""}</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-plan=\"${saved?.PlanNumber || 0}\" data-sequence=\"${saved?.SequenceOrder || 0}\">Choose</button></td></tr>`; }).join("") : "<tr><td colspan=\"4\">No marks found</td></tr>";
+  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); return `<tr><td>${mark}</td><td>${saved?.ModelId || ""}</td><td>${saved?.AssemblyGuid || ""}</td><td>${saved?.PlanId || ""}</td><td class=\"sequence\">${saved?.SequenceOrder || ""}</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-plan=\"${saved?.PlanNumber || 0}\" data-sequence=\"${saved?.SequenceOrder || 0}\">Choose</button></td></tr>`; }).join("") : "<tr><td colspan=\"6\">No marks found</td></tr>";
   document.querySelectorAll(".choose-mark").forEach(button => button.addEventListener("click", () => { selectedMark = decodeURIComponent(button.dataset.mark); selectedPlan = Number(button.dataset.plan); selectedSequence = Number(button.dataset.sequence); }));
 }
 async function loadAssignments() {
@@ -89,13 +89,14 @@ async function loadAssignments() {
     const modelId = model?.id || file.modelId;
     if (!modelId) throw new Error("The selected IFC is not loaded in the 3D Viewer.");
     const base = ERECTION_API.replace(/\/$/, "");
-    const plansResponse = await fetch(`${base}/projects/${encodeURIComponent(projectId())}/models/${encodeURIComponent(modelId)}/plans`, { headers: { authorization: `Bearer ${token}` } });
+    let plansResponse = await fetch(`${base}/projects/${encodeURIComponent(projectId())}/models/${encodeURIComponent(modelId)}/plans`, { headers: { authorization: `Bearer ${token}` } });
+    if (plansResponse.status === 404) plansResponse = await fetch(`${base}/projects/${encodeURIComponent(projectId())}/plans`, { headers: { authorization: `Bearer ${token}` } });
     if (!plansResponse.ok) throw new Error(`Erection plan lookup failed (${plansResponse.status}).`);
     const plans = records(await plansResponse.json());
     const rows = (await Promise.all(plans.map(async plan => {
       const response = await fetch(`${base}/plans/${encodeURIComponent(plan.PlanId)}/assemblies`, { headers: { authorization: `Bearer ${token}` } });
       if (!response.ok) throw new Error(`Assembly assignment lookup failed (${response.status}).`);
-      return records(await response.json()).map(row => ({ ...row, PlanId: row.PlanId || plan.PlanId, PlanNumber: row.PlanNumber || plan.PlanNumber, SequenceOrder: row.SequenceOrder, plan_no: Number(row.PlanNumber || plan.PlanNumber), sequence_no: Number(row.SequenceOrder), sequenceCode: row.SequenceCode || `${plan.PlanNumber}-${row.SequenceOrder}` }));
+      return records(await response.json()).map(row => ({ ...row, ModelId: row.ModelId || modelId, AssemblyGuid: row.AssemblyGuid || row.assemblyGuid || row.GlobalId || row.globalId, PlanId: row.PlanId || plan.PlanId, PlanNumber: row.PlanNumber || plan.PlanNumber, SequenceOrder: row.SequenceOrder, plan_no: Number(row.PlanNumber || plan.PlanNumber), sequence_no: Number(row.SequenceOrder), sequenceCode: row.SequenceCode || `${plan.PlanNumber}-${row.SequenceOrder}` }));
     }))).flat();
     savedAssignments = rows.filter(row => row.AssemblyMark || row.assemblyMark);
   } catch (error) { status(`Could not load assigned sequence numbers: ${error.message}`, true); }

@@ -141,7 +141,8 @@ function findFolder(path) {
 }
 function isChildOf(item, parent, parentPath) {
   const parentIds = entryIdentifiers(parent);
-  if (parentIdentifier(item).some(id => parentIds.includes(id))) return true;
+  const itemParentIds = parentIdentifier(item);
+  if (itemParentIds.length) return itemParentIds.some(id => parentIds.includes(id));
   const itemPath = entryPath(item).toLowerCase();
   const normalizedParent = parentPath.replace(/\/$/, "").toLowerCase();
   if (!itemPath.startsWith(`${normalizedParent}/`)) return false;
@@ -163,7 +164,7 @@ async function loadCwas() {
     await loadProjectEntries();
     const completed = findFolder(COMPLETED_PATH);
     if (!completed) throw new Error("The Completed folder was not found.");
-    cwas = projectEntries.filter(item => item !== completed && isFolder(item) && isChildOf(item, completed, COMPLETED_PATH)).sort((a,b) => label(a).localeCompare(label(b)));
+    cwas = projectEntries.filter(item => item !== completed && isFolder(item) && label(item).toUpperCase() !== "CWA" && isChildOf(item, completed, COMPLETED_PATH)).sort((a,b) => label(a).localeCompare(label(b)));
     options("cwaSelect", cwas.length ? "Select CWA..." : "No folders found in Completed", cwas);
     options("ifcSelect", "Select a CWA folder first", []);
     options("assemblySelect", "Select an IFC file first", []);

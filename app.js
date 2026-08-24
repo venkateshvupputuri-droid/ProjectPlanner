@@ -70,13 +70,13 @@ function extractIfcData(text) {
 }
 function updateAssemblyControls() {
   options("assemblySelect", assemblies.length ? "Select ASSEMBLY_NAME..." : "No ASSEMBLY_NAME values found", assemblies, item => item.assemblyName, item => item.assemblyName);
-  $("markRows").innerHTML = "<tr><td colspan=\"3\">Select an ASSEMBLY_NAME first</td></tr>";
+  $("markRows").innerHTML = "<tr><td colspan=\"4\">Select an ASSEMBLY_NAME first</td></tr>";
 }
 async function loadAssemblyMarks() {
   const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
   const marks = assembly?.marks || [];
   await loadAssignments();
-  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); const sequence = saved?.sequenceCode || ""; return `<tr><td>${mark}</td><td class=\"sequence\">${sequence}</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-plan=\"${saved?.plan_no || 0}\" data-sequence=\"${saved?.sequence_no || 0}\">Choose</button></td></tr>`; }).join("") : "<tr><td colspan=\"3\">No marks found</td></tr>";
+  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); return `<tr><td>${mark}</td><td>${saved?.PlanId || ""}</td><td class=\"sequence\">${saved?.SequenceOrder || ""}</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-plan=\"${saved?.PlanNumber || 0}\" data-sequence=\"${saved?.SequenceOrder || 0}\">Choose</button></td></tr>`; }).join("") : "<tr><td colspan=\"4\">No marks found</td></tr>";
   document.querySelectorAll(".choose-mark").forEach(button => button.addEventListener("click", () => { selectedMark = decodeURIComponent(button.dataset.mark); selectedPlan = Number(button.dataset.plan); selectedSequence = Number(button.dataset.sequence); }));
 }
 async function loadAssignments() {
@@ -91,11 +91,11 @@ async function loadAssignments() {
     const base = ERECTION_API.replace(/\/$/, "");
     const plansResponse = await fetch(`${base}/projects/${encodeURIComponent(projectId())}/models/${encodeURIComponent(modelId)}/plans`, { headers: { authorization: `Bearer ${token}` } });
     if (!plansResponse.ok) throw new Error(`Erection plan lookup failed (${plansResponse.status}).`);
-    const plans = await plansResponse.json();
+    const plans = records(await plansResponse.json());
     const rows = (await Promise.all(plans.map(async plan => {
       const response = await fetch(`${base}/plans/${encodeURIComponent(plan.PlanId)}/assemblies`, { headers: { authorization: `Bearer ${token}` } });
       if (!response.ok) throw new Error(`Assembly assignment lookup failed (${response.status}).`);
-      return (await response.json()).map(row => ({ ...row, plan_no: Number(plan.PlanNumber), sequence_no: Number(row.SequenceOrder), sequenceCode: row.SequenceCode || `${plan.PlanNumber}-${row.SequenceOrder}` }));
+      return records(await response.json()).map(row => ({ ...row, PlanId: row.PlanId || plan.PlanId, PlanNumber: row.PlanNumber || plan.PlanNumber, SequenceOrder: row.SequenceOrder, plan_no: Number(row.PlanNumber || plan.PlanNumber), sequence_no: Number(row.SequenceOrder), sequenceCode: row.SequenceCode || `${plan.PlanNumber}-${row.SequenceOrder}` }));
     }))).flat();
     savedAssignments = rows.filter(row => row.AssemblyMark || row.assemblyMark);
   } catch (error) { status(`Could not load assigned sequence numbers: ${error.message}`, true); }
@@ -119,7 +119,7 @@ async function request(path, asText = false) {
 }
 function records(data) {
   if (Array.isArray(data)) return data;
-  return data?.items || data?.files || data?.folders || (Array.isArray(data?.data) ? data.data : []) || [];
+  return data?.items || data?.files || data?.folders || data?.plans || data?.assemblies || (Array.isArray(data?.data) ? data.data : []) || [];
 }
 function entryPath(item) {
   if (typeof item.path === "string") return item.path.replace(/\\/g, "/").replace(/\/$/, "");

@@ -7,6 +7,7 @@ const status = (text, error = false) => { $("status").textContent = text; $("sta
 const projectId = () => project?.id || project?.projectId || project?.ProjectId;
 const label = item => item.name || item.fileName || item.displayName || "Unnamed";
 const identifier = item => item.id || item.fileId || item.versionId || item.uuid;
+const entryIdentifiers = item => [item.id, item.fileId, item.folderId, item.uuid].filter(Boolean).map(String);
 const fileIdentifier = item => item.fileId || item.id || item.versionId || item.uuid;
 const isFolder = item => item.directory === true || item.type === "folder" || item.type === "Folder" || item.isFolder === true || item.folder === true;
 const isIfc = item => /\.ifc$/i.test(label(item));
@@ -34,6 +35,9 @@ function ifcString(value) {
   const match = String(value || "").match(/^'((?:''|[^'])*)'$/);
   return match ? match[1].replace(/''/g, "'").trim() : "";
 }
+function propertyKey(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
 function extractIfcData(text) {
   const entities = new Map(); const properties = new Map(); const relations = [];
   const entityPattern = /#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(([^;]*?)\)\s*;/gis;
@@ -43,7 +47,7 @@ function extractIfcData(text) {
     if (entity.type === "IFCPROPERTYSINGLEVALUE") {
       const name = ifcString(entity.args[0]);
       const valueMatch = entity.args.slice(2).join(",").match(/IFC(?:LABEL|TEXT|IDENTIFIER|INTEGER|REAL)\s*\(\s*'((?:''|[^'])*)'/i);
-      if (name && valueMatch) properties.set(id, { name: name.toUpperCase(), value: valueMatch[1].replace(/''/g, "'").trim() });
+      if (name && valueMatch) properties.set(id, { name: propertyKey(name), value: valueMatch[1].replace(/''/g, "'").trim() });
     }
     if (entity.type === "IFCRELDEFINESBYPROPERTIES") {
       const propertySet = [...String(entity.args.at(-1)).matchAll(/#\d+/g)].map(item => item[0]).at(-1); const propertyEntity = entities.get(propertySet);
@@ -52,12 +56,12 @@ function extractIfcData(text) {
     }
   }
   const valuesByObject = new Map();
-  for (const relation of relations) for (const objectId of relation.objects) valuesByObject.set(objectId, Object.fromEntries(relation.properties.map(id => [properties.get(id)?.name, properties.get(id)?.value]).filter(([name]) => name)));
+  for (const relation of relations) for (const objectId of relation.objects) valuesByObject.set(objectId, { ...(valuesByObject.get(objectId) || {}), ...Object.fromEntries(relation.properties.map(id => [properties.get(id)?.name, properties.get(id)?.value]).filter(([name]) => name)) });
   const result = [];
   for (const [id, entity] of entities) {
     const values = valuesByObject.get(id) || {}; const name = ifcString(entity.args[2]);
-    const assemblyName = values.ASSEMBLY_NAME || values.ASSEMBLYNAME || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
-    const mark = values.CAST_UNIT_MARK || values.CASTUNITMARK || values.ASSEMBLY_MARK || values.ASSEMBLYMARK || values.MARK || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
+    const assemblyName = values.ASSEMBLYNAME || values.ASSEMBLY || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
+    const mark = values.ASSEMBLYCASTUNITMARK || values.CASTUNITMARK || values.ASSEMBLYMARK || values.MARK || values.TAG || (entity.type === "IFCELEMENTASSEMBLY" ? ifcString(entity.args[3]) : "");
     if (assemblyName && mark) result.push({ id, type: entity.type, assemblyName, mark });
   }
   const grouped = new Map();
@@ -133,10 +137,10 @@ function parentIdentifier(item) {
 }
 function findFolder(path) {
   const name = path.split("/").filter(Boolean).pop();
-  return projectEntries.find(item => isFolder(item) && (label(item) === name || entryPath(item).toLowerCase() === path.toLowerCase()));
+  return projectEntries.find(item => isFolder(item) && entryPath(item).toLowerCase() === path.toLowerCase()) || projectEntries.find(item => isFolder(item) && label(item) === name);
 }
 function isChildOf(item, parent, parentPath) {
-  const parentIds = [parent.id, parent.fileId, parent.folderId].filter(Boolean).map(String);
+  const parentIds = entryIdentifiers(parent);
   if (parentIdentifier(item).some(id => parentIds.includes(id))) return true;
   const itemPath = entryPath(item).toLowerCase();
   const normalizedParent = parentPath.replace(/\/$/, "").toLowerCase();
@@ -144,15 +148,22 @@ function isChildOf(item, parent, parentPath) {
   return !itemPath.slice(normalizedParent.length + 1).includes("/");
 }
 async function list(path, parentEntry = null) {
-  if (!projectEntries.length) projectEntries = records(await request(`/sync/${encodeURIComponent(projectId())}?excludeVersion=true`));
+  await loadProjectEntries();
   const parent = parentEntry || findFolder(path);
   if (!parent) return [];
   return projectEntries.filter(item => item !== parent && isChildOf(item, parent, path));
 }
+async function loadProjectEntries() {
+  if (!projectEntries.length) projectEntries = records(await request(`/sync/${encodeURIComponent(projectId())}?excludeVersion=true`));
+  return projectEntries;
+}
 async function loadCwas() {
   try {
     status("Loading CWA folders from Completed...");
-    cwas = (await list(COMPLETED_PATH)).filter(isFolder).sort((a,b) => label(a).localeCompare(label(b)));
+    await loadProjectEntries();
+    const completed = findFolder(COMPLETED_PATH);
+    if (!completed) throw new Error("The Completed folder was not found.");
+    cwas = projectEntries.filter(item => item !== completed && isFolder(item) && isChildOf(item, completed, COMPLETED_PATH)).sort((a,b) => label(a).localeCompare(label(b)));
     options("cwaSelect", cwas.length ? "Select CWA..." : "No folders found in Completed", cwas);
     options("ifcSelect", "Select a CWA folder first", []);
     options("assemblySelect", "Select an IFC file first", []);

@@ -11,7 +11,7 @@ const entryIdentifiers = item => [item.id, item.fileId, item.folderId, item.uuid
 const fileIdentifier = item => item.fileId || item.id || item.versionId || item.uuid;
 const isFolder = item => item.directory === true || item.type === "folder" || item.type === "Folder" || item.isFolder === true || item.folder === true;
 const isIfc = item => /\.ifc$/i.test(label(item));
-let assemblies = [];
+let assemblies = [], selectedMark = "", selectedSequence = 0;
 function options(id, placeholder, values, value = identifier, text = label) {
   const select = $(id);
   select.replaceChildren(new Option(placeholder, ""), ...values.map(item => new Option(text(item), value(item))));
@@ -70,17 +70,19 @@ function extractIfcData(text) {
 }
 function updateAssemblyControls() {
   options("assemblySelect", assemblies.length ? "Select ASSEMBLY_NAME..." : "No ASSEMBLY_NAME values found", assemblies, item => item.assemblyName, item => item.assemblyName);
-  options("markSelect", "Select assembly/cast unit mark...", []);
+  $("markRows").innerHTML = "<tr><td colspan=\"4\">Select an ASSEMBLY_NAME first</td></tr>";
   $("fabricatorName").value = "";
   $("fabricatorName").disabled = true;
   $("saveFabricator").disabled = true;
 }
 async function loadAssemblyMarks() {
   const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
-  options("markSelect", assembly?.marks.length ? "Select assembly/cast unit mark..." : "No marks found", assembly?.marks || [], item => item, item => item);
+  const marks = assembly?.marks || [];
+  $("markRows").innerHTML = marks.length ? marks.map((mark, index) => `<tr><td>${mark}</td><td class=\"sequence\">1-${index + 1}</td><td class=\"assigned-fabricator\">Not assigned</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-sequence=\"${index + 1}\">Choose</button></td></tr>`).join("") : "<tr><td colspan=\"4\">No marks found</td></tr>";
+  document.querySelectorAll(".choose-mark").forEach(button => button.addEventListener("click", () => { selectedMark = decodeURIComponent(button.dataset.mark); selectedSequence = Number(button.dataset.sequence); loadFabricator(); }));
   $("fabricatorName").value = "";
   $("fabricatorName").disabled = !assembly?.marks.length;
-  $("saveFabricator").disabled = !assembly?.marks.length || !$("markSelect").value;
+  $("saveFabricator").disabled = true;
 }
 async function loadFabricator() {
   if (!FABRICATION_API) return;
@@ -89,16 +91,17 @@ async function loadFabricator() {
     if (!response.ok) throw new Error(`Fabricator lookup failed (${response.status}).`);
     const names = await response.json();
     options("fabricatorName", names.length ? "Select fabricator..." : "No fabricators found", names, item => item.name, item => item.name);
+    $("saveFabricator").disabled = !selectedMark || !names.length;
   } catch (error) { status(`Could not load fabricators: ${error.message}`, true); }
 }
 async function saveFabricator() {
   const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
-  const assemblyName = $("assemblySelect").value; const mark = $("markSelect").value; const fabricatorName = $("fabricatorName").value;
+  const assemblyName = $("assemblySelect").value; const mark = selectedMark; const fabricatorName = $("fabricatorName").value;
   if (!file || !assemblyName || !mark || !fabricatorName) return status("Select an assembly and mark, then enter a fabricator name.", true);
   if (!FABRICATION_API) return status("Fabrication API is not configured. Set FABRICATION_API_URL before saving.", true);
   try {
     status("Saving fabricator...");
-    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-records`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: projectId(), projectName: project.name, fileId: file.fileId || file.id, fileName: label(file), assemblyName, mark, fabricatorName }) });
+    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-records`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: projectId(), projectName: project.name, fileId: file.fileId || file.id, fileName: label(file), assemblyName, mark, fabricatorName, planNo: 1, sequenceNo: selectedSequence }) });
     if (!response.ok) throw new Error(`Save failed (${response.status}).`);
     status("Fabricator saved.");
   } catch (error) { status(`Could not save fabricator: ${error.message}`, true); }
@@ -168,7 +171,6 @@ async function loadCwas() {
     options("cwaSelect", cwas.length ? "Select CWA..." : "No folders found in Completed", cwas);
     options("ifcSelect", "Select a CWA folder first", []);
     options("assemblySelect", "Select an IFC file first", []);
-    options("markSelect", "Select an ASSEMBLY_NAME first", []);
     options("fabricatorName", "Select an assembly/cast unit mark first", []);
     status(cwas.length ? "Choose a CWA folder." : "No folders were found directly inside /Completed.", !cwas.length);
   } catch (error) { status(error.message, true); }
@@ -182,7 +184,6 @@ async function loadIfcFiles() {
     ifcs = (await list(cwaPath, cwa)).filter(isIfc).sort((a,b) => label(a).localeCompare(label(b)));
     options("ifcSelect", ifcs.length ? "Select IFC file..." : "No IFC files found", ifcs);
     options("assemblySelect", "Select an IFC file first", []);
-    options("markSelect", "Select an ASSEMBLY_NAME first", []);
     options("fabricatorName", "Select an assembly/cast unit mark first", []);
     status(ifcs.length ? "Choose an IFC file." : `No IFC files were found in ${label(cwa)}.`, !ifcs.length);
   } catch (error) { status(error.message, true); }
@@ -216,7 +217,7 @@ $("refreshButton").addEventListener("click", loadCwas);
 $("cwaSelect").addEventListener("change", loadIfcFiles);
 $("ifcSelect").addEventListener("change", loadAssemblyNames);
 $("assemblySelect").addEventListener("change", loadAssemblyMarks);
-$("markSelect").addEventListener("change", loadFabricator);
+$("fabricatorName").addEventListener("change", () => { $("saveFabricator").disabled = !selectedMark || !$("fabricatorName").value; });
 $("saveFabricator").addEventListener("click", saveFabricator);
 (async () => {
   try {

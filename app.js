@@ -39,6 +39,10 @@ function ifcString(value) {
 function propertyKey(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
+function numericValue(value) {
+  const match = String(value ?? "").match(/[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/);
+  return match ? Number(match[0]) : 0;
+}
 function extractIfcData(text) {
   markMetrics = new Map();
   const entities = new Map(); const properties = new Map(); const relations = [];
@@ -66,7 +70,7 @@ function extractIfcData(text) {
     const assemblyName = values.ASSEMBLYNAME || values.ASSEMBLY || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
     const mark = values.ASSEMBLYCASTUNITMARK || values.CASTUNITMARK || values.ASSEMBLYMARK || values.MARK || values.TAG || (entity.type === "IFCELEMENTASSEMBLY" ? ifcString(entity.args[3]) : "");
     const quantity = Number(values.QUANTITY || values.QTY || values.COUNT || values.CASTUNITQUANTITY || 0) || 0;
-    const weight = Number(String(values.ASSEMBLYCASTUNITWEIGHT || values.CASTUNITWEIGHT || values.ASSEMBLYWEIGHT || values.WEIGHT || 0).replace(/[^0-9.-]/g, "")) || 0;
+    const weight = numericValue(values.ASSEMBLYCASTUNITWEIGHT || values.CASTUNITWEIGHT || values.ASSEMBLYWEIGHT || values.WEIGHT);
     if (assemblyName && mark) { markMetrics.set(`${assemblyName}|${mark}`, { quantity, weight }); result.push({ id, type: entity.type, assemblyName, mark }); }
   }
   const grouped = new Map();
@@ -79,6 +83,15 @@ function updateAssemblyControls() {
 }
 function qrUrl(mark, saved) { const params = new URLSearchParams({ scan: "1", projectId: projectId() || "", fileId: $("ifcSelect").value || "", assemblyName: $("assemblySelect").value || "", mark, quantity: saved?.quantity ?? "", weight: saved?.weight ?? "", modelId: saved?.ModelId || "", assemblyGuid: saved?.AssemblyGuid || "", planId: saved?.PlanId || "", sequenceOrder: saved?.SequenceOrder || "" }); return `${window.location.origin}${window.location.pathname}?${params}`; }
 function printQr(url) { const popup = window.open("", "_blank", "width=420,height=520"); if (!popup) return; popup.document.write(`<title>Assembly QR code</title><p>${url}</p><div id="qr"></div><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script><script>new QRCode(document.getElementById('qr'),{text:${JSON.stringify(url)},width:260,height:260});window.onload=()=>window.print();<\/script>`); popup.document.close(); }
+function renderQr(node, text) {
+  const QrCode = window.QRCode || globalThis.QRCode;
+  if (!node) return;
+  if (typeof QrCode === "function") {
+    try { new QrCode(node, { text, width: 72, height: 72 }); return; } catch (error) { console.warn("QR code rendering failed", error); }
+  }
+  const encodedText = encodeURIComponent(text);
+  node.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=72x72&amp;data=${encodedText}" width="72" height="72" alt="QR code"><a href="${text.replace(/&/g, "&amp;").replace(/\"/g, "&quot;")}" target="_blank" rel="noopener">Open QR data</a>`;
+}
 async function loadScanDetails() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("scan") !== "1") return;
@@ -225,7 +238,7 @@ async function loadAssemblyMarks() {
   await loadAssignments();
   const rowData = marks.map(markEntry => { const mark = typeof markEntry === "string" ? markEntry : markEntry.mark; const metrics = typeof markEntry === "string" ? markMetrics.get(`${assembly.assemblyName}|${mark}`) || {} : markEntry; const assignment = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark || item.mark) === mark && (!(item.AssemblyName || item.assemblyName || item.assembly_name) || (item.AssemblyName || item.assemblyName || item.assembly_name) === assembly.assemblyName)); return { ...assignment, mark, quantity: metrics.quantity ?? assignment?.quantity, weight: metrics.weight ?? assignment?.weight }; });
   $("markRows").innerHTML = rowData.length ? rowData.map(item => { const qrData = qrUrl(item.mark, item); const weight = Number(item.weight); return `<tr><td>${item.mark}</td><td>${item.quantity ?? ""}</td><td>${Number.isFinite(weight) && weight ? `${weight.toFixed(3)} t` : ""}</td><td><div class="qr-code" id="qr-${encodeURIComponent(item.mark)}"></div></td><td><button type="button" class="print-qr" data-qr="${encodeURIComponent(qrData)}">Print</button></td></tr>`; }).join("") : "<tr><td colspan=\"5\">No marks found</td></tr>";
-  rowData.forEach(item => { const node = $("qr-" + encodeURIComponent(item.mark)); const QrCode = window.QRCode || globalThis.QRCode; if (node && QrCode) new QrCode(node, { text: qrUrl(item.mark, item), width: 72, height: 72 }); else if (node) node.textContent = "QR unavailable"; });
+  rowData.forEach(item => renderQr($("qr-" + encodeURIComponent(item.mark)), qrUrl(item.mark, item)));
   document.querySelectorAll(".print-qr").forEach(button => button.addEventListener("click", () => printQr(decodeURIComponent(button.dataset.qr))));
 }
 async function loadAssemblyNames() {

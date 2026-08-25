@@ -12,7 +12,7 @@ const entryIdentifiers = item => [item.id, item.fileId, item.folderId, item.uuid
 const fileIdentifier = item => item.fileId || item.id || item.versionId || item.uuid;
 const isFolder = item => item.directory === true || item.type === "folder" || item.type === "Folder" || item.isFolder === true || item.folder === true;
 const isIfc = item => /\.ifc$/i.test(label(item));
-let assemblies = [], selectedMark = "", selectedPlan = 0, selectedSequence = 0, savedAssignments = [];
+let assemblies = [], selectedMark = "", selectedPlan = 0, selectedSequence = 0, savedAssignments = [], markMetrics = new Map();
 function options(id, placeholder, values, value = identifier, text = label) {
   const select = $(id);
   select.replaceChildren(new Option(placeholder, ""), ...values.map(item => new Option(text(item), value(item))));
@@ -40,6 +40,7 @@ function propertyKey(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 function extractIfcData(text) {
+  markMetrics = new Map();
   const entities = new Map(); const properties = new Map(); const relations = [];
   const entityPattern = /#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(([^;]*?)\)\s*;/gis;
   let match;
@@ -63,11 +64,13 @@ function extractIfcData(text) {
     const values = valuesByObject.get(id) || {}; const name = ifcString(entity.args[2]);
     const assemblyName = values.ASSEMBLYNAME || values.ASSEMBLY || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
     const mark = values.ASSEMBLYCASTUNITMARK || values.CASTUNITMARK || values.ASSEMBLYMARK || values.MARK || values.TAG || (entity.type === "IFCELEMENTASSEMBLY" ? ifcString(entity.args[3]) : "");
-    if (assemblyName && mark) result.push({ id, type: entity.type, assemblyName, mark });
+    const quantity = Number(values.QUANTITY || values.QTY || values.COUNT || 0) || 0;
+    const weight = Number(String(values.ASSEMBLYCASTUNITWEIGHT || values.CASTUNITWEIGHT || values.WEIGHT || 0).replace(/[^0-9.-]/g, "")) || 0;
+    if (assemblyName && mark) { markMetrics.set(`${assemblyName}|${mark}`, { quantity, weight }); result.push({ id, type: entity.type, assemblyName, mark }); }
   }
   const grouped = new Map();
-  for (const item of result) { if (!grouped.has(item.assemblyName)) grouped.set(item.assemblyName, new Set()); grouped.get(item.assemblyName).add(item.mark); }
-  return [...grouped].map(([assemblyName, marks]) => ({ assemblyName, marks: [...marks].sort((a, b) => a.localeCompare(b)) })).sort((a, b) => a.assemblyName.localeCompare(b.assemblyName));
+  for (const item of result) { if (!grouped.has(item.assemblyName)) grouped.set(item.assemblyName, new Map()); const existing = grouped.get(item.assemblyName).get(item.mark) || { mark: item.mark, quantity: 0, weight: 0 }; existing.quantity ||= item.quantity; existing.weight ||= item.weight; grouped.get(item.assemblyName).set(item.mark, existing); }
+  return [...grouped].map(([assemblyName, marks]) => ({ assemblyName, marks: [...marks.values()].sort((a, b) => a.mark.localeCompare(b.mark)) })).sort((a, b) => a.assemblyName.localeCompare(b.assemblyName));
 }
 function updateAssemblyControls() {
   options("assemblySelect", assemblies.length ? "Select ASSEMBLY_NAME..." : "No ASSEMBLY_NAME values found", assemblies, item => item.assemblyName, item => item.assemblyName);
@@ -77,18 +80,21 @@ async function loadAssemblyMarks() {
   const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
   const marks = assembly?.marks || [];
   await loadAssignments();
+  savedAssignments = savedAssignments.map(row => ({ ...row, ...(markMetrics.get(`${row.AssemblyName || row.assemblyName}|${row.AssemblyMark || row.assemblyMark}`) || {}) })).concat(marks.map(mark => ({ AssemblyName: assembly.assemblyName, AssemblyMark: mark, ...(markMetrics.get(`${assembly.assemblyName}|${mark}`) || {}) })));
   $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); const qrData = qrUrl(mark, saved); return `<tr><td>${mark}</td><td>${saved?.quantity ?? ""}</td><td>${saved?.weight ?? ""}</td><td>${saved?.ModelId || ""}</td><td>${saved?.AssemblyGuid || ""}</td><td>${saved?.PlanId || ""}</td><td class=\"sequence\">${saved?.SequenceOrder || ""}</td><td><div class=\"qr-code\" id=\"qr-${encodeURIComponent(mark)}\"></div></td><td><button type=\"button\" class=\"print-qr\" data-qr=\"${encodeURIComponent(qrData)}\">Print</button></td></tr>`; }).join("") : "<tr><td colspan=\"9\">No marks found</td></tr>";
   marks.forEach(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); const node = $("qr-" + encodeURIComponent(mark)); if (node && window.QRCode) new QRCode(node, { text: qrUrl(mark, saved), width: 72, height: 72 }); });
   document.querySelectorAll(".print-qr").forEach(button => button.addEventListener("click", () => printQr(decodeURIComponent(button.dataset.qr))));
   document.querySelectorAll(".choose-mark").forEach(button => button.addEventListener("click", () => { selectedMark = decodeURIComponent(button.dataset.mark); selectedPlan = Number(button.dataset.plan); selectedSequence = Number(button.dataset.sequence); }));
 }
-function qrUrl(mark, saved) { const params = new URLSearchParams({ scan: "1", projectId: projectId() || "", fileId: $("ifcSelect").value || "", assemblyName: $("assemblySelect").value || "", mark, modelId: saved?.ModelId || "", assemblyGuid: saved?.AssemblyGuid || "", planId: saved?.PlanId || "", sequenceOrder: saved?.SequenceOrder || "" }); return `${window.location.origin}${window.location.pathname}?${params}`; }
+function qrUrl(mark, saved) { const params = new URLSearchParams({ scan: "1", projectId: projectId() || "", fileId: $("ifcSelect").value || "", assemblyName: $("assemblySelect").value || "", mark, quantity: saved?.quantity ?? "", weight: saved?.weight ?? "", modelId: saved?.ModelId || "", assemblyGuid: saved?.AssemblyGuid || "", planId: saved?.PlanId || "", sequenceOrder: saved?.SequenceOrder || "" }); return `${window.location.origin}${window.location.pathname}?${params}`; }
 function printQr(url) { const popup = window.open("", "_blank", "width=420,height=520"); if (!popup) return; popup.document.write(`<title>Assembly QR code</title><p>${url}</p><div id="qr"></div><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script><script>new QRCode(document.getElementById('qr'),{text:${JSON.stringify(url)},width:260,height:260});window.onload=()=>window.print();<\/script>`); popup.document.close(); }
 async function loadScanDetails() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("scan") !== "1") return;
   $("scanPanel").hidden = false;
   $("scanIdentity").textContent = `${params.get("assemblyName") || ""} / ${params.get("mark") || ""}`;
+  $("scanQuantity").value = params.get("quantity") || "";
+  $("scanWeight").value = params.get("weight") || "";
   if (!FABRICATION_API) return;
   try {
     const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-details?${params}`);

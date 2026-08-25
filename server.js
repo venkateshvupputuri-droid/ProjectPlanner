@@ -9,6 +9,20 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "https://venkateshvupputu
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json({ limit: "64kb" }));
 app.get("/health", (_request, response) => response.json({ ok: true, database: "fabricationdata" }));
+app.get("/fabrication-details", async (request, response) => {
+  try {
+    const result = await pool.query("SELECT * FROM fabrication_details WHERE project_id = $1 AND file_id = $2 AND assembly_name = $3 AND mark = $4", [request.query.projectId, request.query.fileId, request.query.assemblyName, request.query.mark]);
+    response.json(result.rows[0] || {});
+  } catch (error) { console.error(error); response.status(500).json({ error: "Could not read fabrication details." }); }
+});
+app.put("/fabrication-details", async (request, response) => {
+  const { projectId, fileId, modelId, assemblyGuid, assemblyName, mark, planId, sequenceOrder, fabricatorName, completionDate, quantity, weight } = request.body || {};
+  if (![projectId, fileId, assemblyName, mark, fabricatorName].every(value => typeof value === "string" && value.trim()) || !Number.isFinite(quantity) || !Number.isFinite(weight)) return response.status(400).json({ error: "Required fabrication details are missing." });
+  try {
+    const result = await pool.query(`INSERT INTO fabrication_details (project_id, file_id, model_id, assembly_guid, assembly_name, mark, plan_id, sequence_order, fabricator_name, completion_date, quantity, weight) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (project_id, file_id, assembly_name, mark) DO UPDATE SET model_id=EXCLUDED.model_id, assembly_guid=EXCLUDED.assembly_guid, plan_id=EXCLUDED.plan_id, sequence_order=EXCLUDED.sequence_order, fabricator_name=EXCLUDED.fabricator_name, completion_date=EXCLUDED.completion_date, quantity=EXCLUDED.quantity, weight=EXCLUDED.weight, updated_at=NOW() RETURNING *`, [projectId.trim(), fileId.trim(), modelId || null, assemblyGuid || null, assemblyName.trim(), mark.trim(), planId || null, Number.isInteger(sequenceOrder) ? sequenceOrder : null, fabricatorName.trim(), completionDate || null, quantity, weight]);
+    response.json(result.rows[0]);
+  } catch (error) { console.error(error); response.status(500).json({ error: "Could not update fabrication details." }); }
+});
 app.get("/fabricators", async (_request, response) => {
   try {
     const result = await pool.query("SELECT id, name FROM fabricators WHERE active = TRUE ORDER BY name");

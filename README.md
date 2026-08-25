@@ -21,3 +21,5 @@ The frontend extracts `ASSEMBLY_NAME` groups and assembly/cast unit marks from t
 3. Copy `.env.example` to `.env` and set `DATABASE_URL` to the `fabricationdata` database.
 4. Start the API with `npm start`.
 5. Set `window.FABRICATION_API_URL` before `app.js` loads to the deployed API URL. GitHub Pages cannot host the API or PostgreSQL database.
+
+Each assembly mark row generates a QR code. Scanning it opens a fabrication update form for that exact project, IFC, assembly, and mark. The form stores fabricator name, completion date, quantity, and weight in `fabrication_details`.

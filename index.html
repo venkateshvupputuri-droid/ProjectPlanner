@@ -6,6 +6,7 @@
   <title>Project Planner</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
   <main>
@@ -18,7 +19,8 @@
       <div class="card"><h2>2. IFC file</h2><label for="ifcSelect">IFC file name</label><select id="ifcSelect" disabled><option>Select a CWA folder first</option></select></div>
       <div class="card"><h2>3. ASSEMBLY_NAME</h2><label for="assemblySelect">ASSEMBLY_NAME</label><select id="assemblySelect" disabled><option>Select an IFC file first</option></select></div>
     </section>
-    <section class="card"><h2>4. Assembly/Cast unit marks</h2><p>Values are read from PlanAssemblies.</p><table><thead><tr><th>Assembly/Cast unit mark</th><th>ModelId</th><th>AssemblyGuid</th><th>PlanId</th><th>SequenceOrder</th><th>Action</th></tr></thead><tbody id="markRows"><tr><td colspan="6">Select an ASSEMBLY_NAME first</td></tr></tbody></table></section>
+    <section class="card"><h2>4. Assembly/Cast unit marks</h2><p>Values are read from PlanAssemblies.</p><table><thead><tr><th>Assembly/Cast unit mark</th><th>Qty</th><th>Weight</th><th>ModelId</th><th>AssemblyGuid</th><th>PlanId</th><th>SequenceOrder</th><th>QR code</th><th>Print</th></tr></thead><tbody id="markRows"><tr><td colspan="9">Select an ASSEMBLY_NAME first</td></tr></tbody></table></section>
+    <section id="scanPanel" class="card scan-panel" hidden><h2>Fabrication update</h2><p id="scanIdentity"></p><label for="scanFabricator">Fabricator name</label><input id="scanFabricator" type="text"><label for="scanCompletionDate">Completion date</label><input id="scanCompletionDate" type="date"><label for="scanQuantity">Quantity</label><input id="scanQuantity" type="number" min="0" step="1"><label for="scanWeight">Weight</label><input id="scanWeight" type="number" min="0" step="0.001"><button id="saveScan" type="button">Update fabrication details</button></section>
     <p id="status" role="status">Connecting�</p>
   </main>
   <script src="app.js"></script>

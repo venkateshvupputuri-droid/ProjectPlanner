@@ -33,3 +33,21 @@ CREATE TABLE IF NOT EXISTS fabricators (
   active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS fabrication_details (
+  id BIGSERIAL PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  file_id TEXT NOT NULL,
+  model_id TEXT,
+  assembly_guid TEXT,
+  assembly_name TEXT NOT NULL,
+  mark TEXT NOT NULL,
+  plan_id TEXT,
+  sequence_order INTEGER,
+  fabricator_name TEXT NOT NULL,
+  completion_date DATE,
+  quantity NUMERIC(12, 3) NOT NULL,
+  weight NUMERIC(12, 3) NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (project_id, file_id, assembly_name, mark)
+);

@@ -2,6 +2,7 @@ const COMPLETED_PATH = "/Completed";
 const ORIGINS = ["https://app.connect.trimble.com","https://app21.connect.trimble.com","https://app31.connect.trimble.com","https://app32.connect.trimble.com","https://app22.connect.trimble.com"];
 let workspace, token, project, origin, cwas = [], ifcs = [], projectEntries = [];
 const ERECTION_API = window.ERECTION_PLANNER_API_BASE || "https://followed-recruiting-album-noted.trycloudflare.com/api";
+const FABRICATION_API = window.FABRICATION_API_URL || "";
 const $ = id => document.getElementById(id);
 const status = (text, error = false) => { $("status").textContent = text; $("status").classList.toggle("error", error); };
 const projectId = () => project?.id || project?.projectId || project?.ProjectId;
@@ -70,14 +71,45 @@ function extractIfcData(text) {
 }
 function updateAssemblyControls() {
   options("assemblySelect", assemblies.length ? "Select ASSEMBLY_NAME..." : "No ASSEMBLY_NAME values found", assemblies, item => item.assemblyName, item => item.assemblyName);
-  $("markRows").innerHTML = "<tr><td colspan=\"4\">Select an ASSEMBLY_NAME first</td></tr>";
+  $("markRows").innerHTML = "<tr><td colspan=\"9\">Select an ASSEMBLY_NAME first</td></tr>";
 }
 async function loadAssemblyMarks() {
   const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
   const marks = assembly?.marks || [];
   await loadAssignments();
-  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); return `<tr><td>${mark}</td><td>${saved?.ModelId || ""}</td><td>${saved?.AssemblyGuid || ""}</td><td>${saved?.PlanId || ""}</td><td class=\"sequence\">${saved?.SequenceOrder || ""}</td><td><button type=\"button\" class=\"choose-mark\" data-mark=\"${encodeURIComponent(mark)}\" data-plan=\"${saved?.PlanNumber || 0}\" data-sequence=\"${saved?.SequenceOrder || 0}\">Choose</button></td></tr>`; }).join("") : "<tr><td colspan=\"6\">No marks found</td></tr>";
+  $("markRows").innerHTML = marks.length ? marks.map(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); const qrData = qrUrl(mark, saved); return `<tr><td>${mark}</td><td>${saved?.quantity ?? ""}</td><td>${saved?.weight ?? ""}</td><td>${saved?.ModelId || ""}</td><td>${saved?.AssemblyGuid || ""}</td><td>${saved?.PlanId || ""}</td><td class=\"sequence\">${saved?.SequenceOrder || ""}</td><td><div class=\"qr-code\" id=\"qr-${encodeURIComponent(mark)}\"></div></td><td><button type=\"button\" class=\"print-qr\" data-qr=\"${encodeURIComponent(qrData)}\">Print</button></td></tr>`; }).join("") : "<tr><td colspan=\"9\">No marks found</td></tr>";
+  marks.forEach(mark => { const saved = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName); const node = $("qr-" + encodeURIComponent(mark)); if (node && window.QRCode) new QRCode(node, { text: qrUrl(mark, saved), width: 72, height: 72 }); });
+  document.querySelectorAll(".print-qr").forEach(button => button.addEventListener("click", () => printQr(decodeURIComponent(button.dataset.qr))));
   document.querySelectorAll(".choose-mark").forEach(button => button.addEventListener("click", () => { selectedMark = decodeURIComponent(button.dataset.mark); selectedPlan = Number(button.dataset.plan); selectedSequence = Number(button.dataset.sequence); }));
+}
+function qrUrl(mark, saved) { const params = new URLSearchParams({ scan: "1", projectId: projectId() || "", fileId: $("ifcSelect").value || "", assemblyName: $("assemblySelect").value || "", mark, modelId: saved?.ModelId || "", assemblyGuid: saved?.AssemblyGuid || "", planId: saved?.PlanId || "", sequenceOrder: saved?.SequenceOrder || "" }); return `${window.location.origin}${window.location.pathname}?${params}`; }
+function printQr(url) { const popup = window.open("", "_blank", "width=420,height=520"); if (!popup) return; popup.document.write(`<title>Assembly QR code</title><p>${url}</p><div id="qr"></div><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script><script>new QRCode(document.getElementById('qr'),{text:${JSON.stringify(url)},width:260,height:260});window.onload=()=>window.print();<\/script>`); popup.document.close(); }
+async function loadScanDetails() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("scan") !== "1") return;
+  $("scanPanel").hidden = false;
+  $("scanIdentity").textContent = `${params.get("assemblyName") || ""} / ${params.get("mark") || ""}`;
+  if (!FABRICATION_API) return;
+  try {
+    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-details?${params}`);
+    if (!response.ok) throw new Error(`Fabrication lookup failed (${response.status}).`);
+    const details = await response.json();
+    $("scanFabricator").value = details.fabricator_name || "";
+    $("scanCompletionDate").value = details.completion_date ? details.completion_date.slice(0, 10) : "";
+    $("scanQuantity").value = details.quantity ?? "";
+    $("scanWeight").value = details.weight ?? "";
+  } catch (error) { status(`Could not load fabrication details: ${error.message}`, true); }
+}
+async function saveScanDetails() {
+  if (!FABRICATION_API) return status("Fabrication API is not configured.", true);
+  const params = new URLSearchParams(window.location.search);
+  const body = { projectId: params.get("projectId"), fileId: params.get("fileId"), assemblyName: params.get("assemblyName"), mark: params.get("mark"), modelId: params.get("modelId"), assemblyGuid: params.get("assemblyGuid"), planId: params.get("planId"), sequenceOrder: params.get("sequenceOrder"), fabricatorName: $("scanFabricator").value.trim(), completionDate: $("scanCompletionDate").value || null, quantity: Number($("scanQuantity").value), weight: Number($("scanWeight").value) };
+  if (!body.fabricatorName || !Number.isFinite(body.quantity) || !Number.isFinite(body.weight)) return status("Enter fabricator, quantity, and weight.", true);
+  try {
+    const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-details`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!response.ok) throw new Error(`Fabrication update failed (${response.status}).`);
+    status("Fabrication details updated.");
+  } catch (error) { status(`Could not update fabrication details: ${error.message}`, true); }
 }
 async function loadAssignments() {
   savedAssignments = [];
@@ -210,7 +242,10 @@ $("refreshButton").addEventListener("click", loadCwas);
 $("cwaSelect").addEventListener("change", loadIfcFiles);
 $("ifcSelect").addEventListener("change", loadAssemblyNames);
 $("assemblySelect").addEventListener("change", loadAssemblyMarks);
+$("saveScan")?.addEventListener("click", saveScanDetails);
+loadScanDetails();
 (async () => {
+  if (new URLSearchParams(window.location.search).get("scan") === "1") return;
   try {
     workspace = await TrimbleConnectWorkspace.connect(window.parent, eventHandler, 30000);
     project = await (workspace.project.getCurrentProject?.() || workspace.project.getProject());

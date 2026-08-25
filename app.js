@@ -50,7 +50,7 @@ function extractIfcData(text) {
   let match;
   while ((match = entityPattern.exec(text))) entities.set(`#${match[1]}`, { type: match[2].toUpperCase(), args: splitIfcArguments(match[3]) });
   for (const [id, entity] of entities) {
-    if (["IFCPROPERTYSINGLEVALUE", "IFCPROPERTYLISTVALUE", "IFCPROPERTYREFERENCEVALUE", "IFCPROPERTYENUMERATEDVALUE"].includes(entity.type)) {
+    if (["IFCPROPERTYSINGLEVALUE", "IFCPROPERTYLISTVALUE", "IFCPROPERTYREFERENCEVALUE", "IFCPROPERTYENUMERATEDVALUE", "IFCQUANTITYWEIGHT", "IFCQUANTITYMASS", "IFCQUANTITYCOUNT", "IFCQUANTITYNUMBER", "IFCQUANTITYLENGTH", "IFCQUANTITYAREA", "IFCQUANTITYVOLUME"].includes(entity.type)) {
       const name = ifcString(entity.args[0]);
       const valueText = entity.args.slice(2).join(",");
       const valueMatch = valueText.match(/IFC(?:LABEL|TEXT|IDENTIFIER)\s*\(\s*'((?:''|[^'])*)'/i) || valueText.match(/IFC[A-Z0-9_]+\s*\(\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*\)/i) || valueText.match(/([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/);
@@ -59,7 +59,7 @@ function extractIfcData(text) {
     if (entity.type === "IFCRELDEFINESBYPROPERTIES") {
       const propertySet = [...String(entity.args.at(-1)).matchAll(/#\d+/g)].map(item => item[0]).at(-1); const propertyEntity = entities.get(propertySet);
       const objects = [...String(entity.args[4] || "").matchAll(/#\d+/g)].map(item => item[0]);
-      if (propertyEntity?.type === "IFCPROPERTYSET") relations.push({ objects, properties: propertyEntity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0])) });
+      if (["IFCPROPERTYSET", "IFCELEMENTQUANTITY"].includes(propertyEntity?.type)) relations.push({ objects, properties: propertyEntity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0])) });
     }
   }
   const valuesByObject = new Map();
@@ -90,13 +90,8 @@ function renderQr(node, text) {
   if (typeof QrCode === "function") {
     try { new QrCode(node, { text, width: 72, height: 72 }); return; } catch (error) { console.warn("QR code rendering failed", error); }
   }
-  const canvas = document.createElement("canvas"); canvas.width = 72; canvas.height = 72; const context = canvas.getContext("2d");
-  context.fillStyle = "#fff"; context.fillRect(0, 0, 72, 72); context.fillStyle = "#000";
-  let hash = 2166136261; for (const character of text) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
-  const size = 21; const cell = 3; const finder = (originX, originY) => { context.fillRect(originX, originY, 21, 21); context.fillStyle = "#fff"; context.fillRect(originX + 3, originY + 3, 15, 15); context.fillStyle = "#000"; context.fillRect(originX + 6, originY + 6, 9, 9); };
-  finder(3, 3); finder(48, 3); finder(3, 48);
-  for (let row = 0; row < size; row += 1) for (let column = 0; column < size; column += 1) if (!((row < 8 && column < 8) || (row < 8 && column > 14) || (row > 14 && column < 8))) { hash = Math.imul(hash ^ (row * size + column), 16777619); if (hash & 1) context.fillRect(column * cell, row * cell, cell, cell); }
-  node.append(canvas); const escapedUrl = text.replace(/&/g, "&amp;").replace(/\"/g, "&quot;"); node.insertAdjacentHTML("beforeend", `<a href="${escapedUrl}" target="_blank" rel="noopener">Open QR data</a>`);
+  const encodedText = encodeURIComponent(text); const escapedUrl = text.replace(/&/g, "&amp;").replace(/\"/g, "&quot;");
+  node.innerHTML = `<img src="https://quickchart.io/qr?size=160&text=${encodedText}" width="72" height="72" alt="Scannable QR code"><a href="${escapedUrl}" target="_blank" rel="noopener">Open QR data</a>`;
 }
 async function loadScanDetails() {
   const params = new URLSearchParams(window.location.search);

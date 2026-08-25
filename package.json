@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "start:sqlserver": "node server-sqlserver.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "mssql": "^11.0.1",
+    "msnodesqlv8": "^4.2.1",
     "express": "^4.21.2",
     "pg": "^8.13.1"
   }

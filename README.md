@@ -23,3 +23,9 @@ The frontend extracts `ASSEMBLY_NAME` groups and assembly/cast unit marks from t
 5. Set `window.FABRICATION_API_URL` before `app.js` loads to the deployed API URL. GitHub Pages cannot host the API or PostgreSQL database.
 
 Each assembly mark row generates a QR code. Scanning it opens a fabrication update form for that exact project, IFC, assembly, and mark. The form stores fabricator name, completion date, quantity, and weight in `fabrication_details`.
+
+## Local SQL Server mode
+
+The Render API uses PostgreSQL. To save directly to a local SQL Server instance using Windows Authentication, run `npm install` and then `npm run start:sqlserver` on the Windows machine that can access `DESKTOP-MJI8OIQ\SQLEXPRESS`. The API creates `ErectionPlanner.dbo.FabricationDetails` automatically. Set `SQL_SERVER`, `SQL_DATABASE`, `PORT`, and `ALLOWED_ORIGINS` if the defaults do not apply.
+
+For mobile access, expose the local port with Cloudflare Tunnel, for example `cloudflared tunnel --url http://localhost:3000`, then configure that HTTPS URL as `window.FABRICATION_API_URL` before `app.js` loads. The computer, SQL Server, API, and tunnel must remain running while mobile updates are being saved.

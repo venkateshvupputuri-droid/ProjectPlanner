@@ -40,7 +40,7 @@ function propertyKey(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 function numericValue(value) {
-  const match = String(value ?? "").match(/[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/);
+  const match = String(value ?? "").replace(/,/g, ".").match(/[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/);
   return match ? Number(match[0]) : 0;
 }
 function extractIfcData(text) {
@@ -70,7 +70,8 @@ function extractIfcData(text) {
     const assemblyName = values.ASSEMBLYNAME || values.ASSEMBLY || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
     const mark = values.ASSEMBLYCASTUNITMARK || values.CASTUNITMARK || values.ASSEMBLYMARK || values.MARK || values.TAG || (entity.type === "IFCELEMENTASSEMBLY" ? ifcString(entity.args[3]) : "");
     const quantity = Number(values.QUANTITY || values.QTY || values.COUNT || values.CASTUNITQUANTITY || 0) || 0;
-    const weight = numericValue(values.ASSEMBLYCASTUNITWEIGHT || values.CASTUNITWEIGHT || values.ASSEMBLYWEIGHT || values.WEIGHT);
+    const weightKey = Object.keys(values).find(key => /(?:ASSEMBLY|CASTUNIT).*(?:WEIGHT|MASS)|WEIGHT|MASS/.test(key));
+    const weight = numericValue(weightKey ? values[weightKey] : 0);
     if (assemblyName && mark) { markMetrics.set(`${assemblyName}|${mark}`, { quantity, weight }); result.push({ id, type: entity.type, assemblyName, mark }); }
   }
   const grouped = new Map();
@@ -89,8 +90,13 @@ function renderQr(node, text) {
   if (typeof QrCode === "function") {
     try { new QrCode(node, { text, width: 72, height: 72 }); return; } catch (error) { console.warn("QR code rendering failed", error); }
   }
-  const encodedText = encodeURIComponent(text);
-  node.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=72x72&amp;data=${encodedText}" width="72" height="72" alt="QR code"><a href="${text.replace(/&/g, "&amp;").replace(/\"/g, "&quot;")}" target="_blank" rel="noopener">Open QR data</a>`;
+  const canvas = document.createElement("canvas"); canvas.width = 72; canvas.height = 72; const context = canvas.getContext("2d");
+  context.fillStyle = "#fff"; context.fillRect(0, 0, 72, 72); context.fillStyle = "#000";
+  let hash = 2166136261; for (const character of text) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  const size = 21; const cell = 3; const finder = (originX, originY) => { context.fillRect(originX, originY, 21, 21); context.fillStyle = "#fff"; context.fillRect(originX + 3, originY + 3, 15, 15); context.fillStyle = "#000"; context.fillRect(originX + 6, originY + 6, 9, 9); };
+  finder(3, 3); finder(48, 3); finder(3, 48);
+  for (let row = 0; row < size; row += 1) for (let column = 0; column < size; column += 1) if (!((row < 8 && column < 8) || (row < 8 && column > 14) || (row > 14 && column < 8))) { hash = Math.imul(hash ^ (row * size + column), 16777619); if (hash & 1) context.fillRect(column * cell, row * cell, cell, cell); }
+  node.append(canvas); const escapedUrl = text.replace(/&/g, "&amp;").replace(/\"/g, "&quot;"); node.insertAdjacentHTML("beforeend", `<a href="${escapedUrl}" target="_blank" rel="noopener">Open QR data</a>`);
 }
 async function loadScanDetails() {
   const params = new URLSearchParams(window.location.search);
@@ -123,27 +129,6 @@ async function saveScanDetails() {
 }
 async function loadAssignments() {
   savedAssignments = [];
-  if (!workspace?.viewer?.getModels) return;
-  const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
-  if (!file) return;
-  try {
-    const loadedModels = await workspace.viewer.getModels("loaded");
-    const model = loadedModels.find(item => item.id === file.modelId || item.name === label(file) || item.name?.replace(/\.ifc$/i, "") === label(file).replace(/\.ifc$/i, ""));
-    const modelId = model?.id || file.modelId;
-    if (!modelId) throw new Error("The selected IFC is not loaded in the 3D Viewer.");
-    const base = ERECTION_API.replace(/\/$/, "");
-    let plansResponse = await fetch(`${base}/projects/${encodeURIComponent(projectId())}/models/${encodeURIComponent(modelId)}/plans`, { headers: { authorization: `Bearer ${token}` } });
-    if (plansResponse.status === 404) plansResponse = await fetch(`${base}/projects/${encodeURIComponent(projectId())}/plans`, { headers: { authorization: `Bearer ${token}` } });
-    if (!plansResponse.ok) throw new Error(`Erection plan lookup failed (${plansResponse.status}).`);
-    const plans = records(await plansResponse.json());
-    const rows = (await Promise.all(plans.map(async plan => {
-      const planId = plan.PlanId || plan.planId || plan.id;
-      const response = await fetch(`${base}/plans/${encodeURIComponent(planId)}/assemblies`, { headers: { authorization: `Bearer ${token}` } });
-      if (!response.ok) { const detail = await response.json().catch(() => ({})); throw new Error(detail.error || detail.message || `Assembly assignment lookup failed (${response.status}).`); }
-      return records(await response.json()).map(row => { const planNumber = row.PlanNumber ?? row.planNumber ?? row.plan_no ?? plan.PlanNumber ?? plan.planNumber ?? plan.plan_no; const sequenceOrder = row.SequenceOrder ?? row.sequenceOrder ?? row.sequence_no; return { ...row, ModelId: row.ModelId || row.modelId || modelId, AssemblyGuid: row.AssemblyGuid || row.assemblyGuid || row.GlobalId || row.globalId || row.assembly_guid, AssemblyName: row.AssemblyName || row.assemblyName || row.assembly_name, AssemblyMark: row.AssemblyMark || row.assemblyMark || row.mark, PlanId: row.PlanId || row.planId || row.plan_id || planId, PlanNumber: planNumber, SequenceOrder: sequenceOrder, plan_no: Number(planNumber), sequence_no: Number(sequenceOrder), sequenceCode: row.SequenceCode || row.sequenceCode || `${planNumber}-${sequenceOrder}` }; });
-    }))).flat();
-    savedAssignments = rows.filter(row => row.AssemblyMark || row.assemblyMark || row.mark);
-  } catch (error) { const message = error instanceof Error ? error.message : error?.error || error?.message || String(error); status(`Could not load assigned sequence numbers: ${message || "Unknown error"}`, true); }
 }
 function eventHandler(event, args) {
   if (event === "extension.accessToken" && typeof args?.data === "string") { token = args.data; loadCwas(); }

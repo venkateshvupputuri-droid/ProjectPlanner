@@ -43,6 +43,10 @@ function numericValue(value) {
   const match = String(value ?? "").replace(/,/g, ".").match(/[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/);
   return match ? Number(match[0]) : 0;
 }
+function weightInTonnes(value, name = "") {
+  const number = numericValue(value);
+  return /(?:KG|KILOGRAM)/i.test(name) ? number / 1000 : number;
+}
 function extractIfcData(text) {
   markMetrics = new Map();
   const entities = new Map(); const properties = new Map(); const relations = [];
@@ -54,7 +58,7 @@ function extractIfcData(text) {
       const name = ifcString(entity.args[0]);
       const valueText = entity.args.slice(2).join(",");
       const valueMatch = valueText.match(/IFC(?:LABEL|TEXT|IDENTIFIER)\s*\(\s*'((?:''|[^'])*)'/i) || valueText.match(/IFC[A-Z0-9_]+\s*\(\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*\)/i) || valueText.match(/([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/);
-      if (name && valueMatch) properties.set(id, { name: propertyKey(name), value: valueMatch[1].replace(/''/g, "'").trim() });
+      if (name && valueMatch) properties.set(id, { name: propertyKey(name), value: valueMatch[1].replace(/''/g, "'").trim(), type: entity.type });
     }
     if (entity.type === "IFCRELDEFINESBYPROPERTIES") {
       const propertySet = [...entity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0]))].at(-1); const propertyEntity = entities.get(propertySet);
@@ -63,15 +67,16 @@ function extractIfcData(text) {
     }
   }
   const valuesByObject = new Map();
-  for (const relation of relations) for (const objectId of relation.objects) valuesByObject.set(objectId, { ...(valuesByObject.get(objectId) || {}), ...Object.fromEntries(relation.properties.map(id => [properties.get(id)?.name, properties.get(id)?.value]).filter(([name]) => name)) });
+  for (const relation of relations) for (const objectId of relation.objects) valuesByObject.set(objectId, { ...(valuesByObject.get(objectId) || {}), ...Object.fromEntries(relation.properties.map(id => { const property = properties.get(id); return [property?.name, property ? { value: property.value, type: property.type } : null]; }).filter(([name]) => name)) });
   const result = [];
   for (const [id, entity] of entities) {
     const values = valuesByObject.get(id) || {}; const name = ifcString(entity.args[2]);
-    const assemblyName = values.ASSEMBLYNAME || values.ASSEMBLY || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
-    const mark = values.ASSEMBLYCASTUNITMARK || values.CASTUNITMARK || values.ASSEMBLYMARK || values.MARK || values.TAG || (entity.type === "IFCELEMENTASSEMBLY" ? ifcString(entity.args[3]) : "");
-    const quantity = Number(values.QUANTITY || values.QTY || values.COUNT || values.CASTUNITQUANTITY || 0) || 0;
+    const value = key => values[key]?.value ?? values[key] ?? "";
+    const assemblyName = value("ASSEMBLYNAME") || value("ASSEMBLY") || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
+    const mark = value("ASSEMBLYCASTUNITMARK") || value("CASTUNITMARK") || value("ASSEMBLYMARK") || value("MARK") || value("TAG") || (entity.type === "IFCELEMENTASSEMBLY" ? ifcString(entity.args[3]) : "");
+    const quantity = numericValue(value("QUANTITY") || value("QTY") || value("COUNT") || value("CASTUNITQUANTITY"));
     const weightKey = Object.keys(values).find(key => /(?:ASSEMBLY|CASTUNIT).*(?:WEIGHT|MASS)|WEIGHT|MASS/.test(key));
-    const weight = numericValue(weightKey ? values[weightKey] : 0);
+    const weight = weightInTonnes(weightKey ? value(weightKey) : 0, weightKey);
     if (assemblyName && mark) { markMetrics.set(`${assemblyName}|${mark}`, { quantity, weight }); result.push({ id, type: entity.type, assemblyName, mark }); }
   }
   const grouped = new Map();
@@ -83,7 +88,7 @@ function updateAssemblyControls() {
   $("markRows").innerHTML = "<tr><td colspan=\"9\">Select an ASSEMBLY_NAME first</td></tr>";
 }
 function qrUrl(mark, saved) { const params = new URLSearchParams({ scan: "1", projectId: projectId() || "", fileId: $("ifcSelect").value || "", assemblyName: $("assemblySelect").value || "", mark, quantity: saved?.modelQuantity ?? saved?.quantity ?? "", weight: saved?.eachWeight ?? saved?.modelWeight ?? saved?.weight ?? "", modelId: saved?.ModelId || "", assemblyGuid: saved?.AssemblyGuid || "", planId: saved?.PlanId || "", sequenceOrder: saved?.SequenceOrder || "" }); return `${window.location.origin}${window.location.pathname}?${params}`; }
-function printQr(url) { const popup = window.open("", "_blank", "width=420,height=520"); if (!popup) return; popup.document.write(`<title>Assembly QR code</title><p>${url}</p><div id="qr"></div><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script><script>new QRCode(document.getElementById('qr'),{text:${JSON.stringify(url)},width:260,height:260});window.onload=()=>window.print();<\/script>`); popup.document.close(); }
+function printQr(url) { const popup = window.open("", "_blank", "width=420,height=520"); if (!popup) return; const encodedText = encodeURIComponent(url); popup.document.write(`<title>Assembly QR code</title><p>${url}</p><img src="https://quickchart.io/qr?size=320&text=${encodedText}" width="320" height="320" alt="Scannable QR code"><script>window.onload=()=>window.print();<\/script>`); popup.document.close(); }
 function renderQr(node, text) {
   const QrCode = window.QRCode || globalThis.QRCode;
   if (!node) return;

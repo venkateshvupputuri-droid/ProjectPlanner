@@ -70,7 +70,7 @@ function extractIfcData(text) {
     if (assemblyName && mark) { markMetrics.set(`${assemblyName}|${mark}`, { quantity, weight }); result.push({ id, type: entity.type, assemblyName, mark }); }
   }
   const grouped = new Map();
-  for (const item of result) { if (!grouped.has(item.assemblyName)) grouped.set(item.assemblyName, new Map()); const existing = grouped.get(item.assemblyName).get(item.mark) || { mark: item.mark, quantity: 0, weight: 0 }; existing.quantity ||= item.quantity; existing.weight ||= item.weight; grouped.get(item.assemblyName).set(item.mark, existing); }
+  for (const item of result) { if (!grouped.has(item.assemblyName)) grouped.set(item.assemblyName, new Map()); const existing = grouped.get(item.assemblyName).get(item.mark) || { mark: item.mark, quantity: 0, weight: 0 }; existing.quantity += item.quantity || 1; existing.weight += item.weight; grouped.get(item.assemblyName).set(item.mark, existing); }
   return [...grouped].map(([assemblyName, marks]) => ({ assemblyName, marks: [...marks.values()].sort((a, b) => a.mark.localeCompare(b.mark)) })).sort((a, b) => a.assemblyName.localeCompare(b.assemblyName));
 }
 function updateAssemblyControls() {
@@ -123,12 +123,13 @@ async function loadAssignments() {
     if (!plansResponse.ok) throw new Error(`Erection plan lookup failed (${plansResponse.status}).`);
     const plans = records(await plansResponse.json());
     const rows = (await Promise.all(plans.map(async plan => {
-      const response = await fetch(`${base}/plans/${encodeURIComponent(plan.PlanId)}/assemblies`, { headers: { authorization: `Bearer ${token}` } });
-      if (!response.ok) throw new Error(`Assembly assignment lookup failed (${response.status}).`);
-      return records(await response.json()).map(row => ({ ...row, ModelId: row.ModelId || modelId, AssemblyGuid: row.AssemblyGuid || row.assemblyGuid || row.GlobalId || row.globalId, PlanId: row.PlanId || plan.PlanId, PlanNumber: row.PlanNumber || plan.PlanNumber, SequenceOrder: row.SequenceOrder, plan_no: Number(row.PlanNumber || plan.PlanNumber), sequence_no: Number(row.SequenceOrder), sequenceCode: row.SequenceCode || `${plan.PlanNumber}-${row.SequenceOrder}` }));
+      const planId = plan.PlanId || plan.planId || plan.id;
+      const response = await fetch(`${base}/plans/${encodeURIComponent(planId)}/assemblies`, { headers: { authorization: `Bearer ${token}` } });
+      if (!response.ok) { const detail = await response.json().catch(() => ({})); throw new Error(detail.error || detail.message || `Assembly assignment lookup failed (${response.status}).`); }
+      return records(await response.json()).map(row => { const planNumber = row.PlanNumber ?? row.planNumber ?? row.plan_no ?? plan.PlanNumber ?? plan.planNumber ?? plan.plan_no; const sequenceOrder = row.SequenceOrder ?? row.sequenceOrder ?? row.sequence_no; return { ...row, ModelId: row.ModelId || row.modelId || modelId, AssemblyGuid: row.AssemblyGuid || row.assemblyGuid || row.GlobalId || row.globalId || row.assembly_guid, AssemblyName: row.AssemblyName || row.assemblyName || row.assembly_name, AssemblyMark: row.AssemblyMark || row.assemblyMark || row.mark, PlanId: row.PlanId || row.planId || row.plan_id || planId, PlanNumber: planNumber, SequenceOrder: sequenceOrder, plan_no: Number(planNumber), sequence_no: Number(sequenceOrder), sequenceCode: row.SequenceCode || row.sequenceCode || `${planNumber}-${sequenceOrder}` }; });
     }))).flat();
-    savedAssignments = rows.filter(row => row.AssemblyMark || row.assemblyMark);
-  } catch (error) { status(`Could not load assigned sequence numbers: ${error.message}`, true); }
+    savedAssignments = rows.filter(row => row.AssemblyMark || row.assemblyMark || row.mark);
+  } catch (error) { const message = error instanceof Error ? error.message : error?.error || error?.message || String(error); status(`Could not load assigned sequence numbers: ${message || "Unknown error"}`, true); }
 }
 function eventHandler(event, args) {
   if (event === "extension.accessToken" && typeof args?.data === "string") { token = args.data; loadCwas(); }
@@ -149,7 +150,7 @@ async function request(path, asText = false) {
 }
 function records(data) {
   if (Array.isArray(data)) return data;
-  return data?.items || data?.files || data?.folders || data?.plans || data?.assemblies || (Array.isArray(data?.data) ? data.data : []) || [];
+  return data?.items || data?.records || data?.files || data?.folders || data?.plans || data?.assemblies || (Array.isArray(data?.data) ? data.data : data?.data?.items || data?.data?.records || data?.data?.assemblies || []) || [];
 }
 function entryPath(item) {
   if (typeof item.path === "string") return item.path.replace(/\\/g, "/").replace(/\/$/, "");
@@ -221,9 +222,9 @@ async function loadAssemblyMarks() {
   const assembly = assemblies.find(item => item.assemblyName === $("assemblySelect").value);
   const marks = assembly?.marks || [];
   await loadAssignments();
-  const rowData = marks.map(mark => ({ mark, ...(markMetrics.get(`${assembly.assemblyName}|${mark}`) || {}), ...savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark) === mark && (item.AssemblyName || item.assemblyName) === assembly.assemblyName) }));
-  $("markRows").innerHTML = rowData.length ? rowData.map(item => { const qrData = qrUrl(item.mark, item); return `<tr><td>${item.mark}</td><td>${item.quantity ?? ""}</td><td>${item.weight ?? ""}</td><td><div class="qr-code" id="qr-${encodeURIComponent(item.mark)}"></div></td><td><button type="button" class="print-qr" data-qr="${encodeURIComponent(qrData)}">Print</button></td></tr>`; }).join("") : "<tr><td colspan=\"5\">No marks found</td></tr>";
-  rowData.forEach(item => { const node = $("qr-" + encodeURIComponent(item.mark)); if (node && window.QRCode) new QRCode(node, { text: qrUrl(item.mark, item), width: 72, height: 72 }); });
+  const rowData = marks.map(markEntry => { const mark = typeof markEntry === "string" ? markEntry : markEntry.mark; const metrics = typeof markEntry === "string" ? markMetrics.get(`${assembly.assemblyName}|${mark}`) || {} : markEntry; const assignment = savedAssignments.find(item => (item.AssemblyMark || item.assemblyMark || item.mark) === mark && (!(item.AssemblyName || item.assemblyName || item.assembly_name) || (item.AssemblyName || item.assemblyName || item.assembly_name) === assembly.assemblyName)); return { ...assignment, mark, quantity: metrics.quantity ?? assignment?.quantity, weight: metrics.weight ?? assignment?.weight }; });
+  $("markRows").innerHTML = rowData.length ? rowData.map(item => { const qrData = qrUrl(item.mark, item); const weight = Number(item.weight); return `<tr><td>${item.mark}</td><td>${item.quantity ?? ""}</td><td>${Number.isFinite(weight) && weight ? `${weight.toFixed(3)} t` : ""}</td><td><div class="qr-code" id="qr-${encodeURIComponent(item.mark)}"></div></td><td><button type="button" class="print-qr" data-qr="${encodeURIComponent(qrData)}">Print</button></td></tr>`; }).join("") : "<tr><td colspan=\"5\">No marks found</td></tr>";
+  rowData.forEach(item => { const node = $("qr-" + encodeURIComponent(item.mark)); if (node && window.QRCode) new QRCode(node, { text: qrUrl(item.mark, item), width: 72, height: 72 }); else if (node) node.textContent = "QR unavailable"; });
   document.querySelectorAll(".print-qr").forEach(button => button.addEventListener("click", () => printQr(decodeURIComponent(button.dataset.qr))));
 }
 async function loadAssemblyNames() {

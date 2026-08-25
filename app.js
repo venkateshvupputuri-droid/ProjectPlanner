@@ -96,11 +96,16 @@ function renderQr(node, text) {
 async function loadScanDetails() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("scan") !== "1") return;
+  $("plannerControls").hidden = true;
+  $("marksPanel").hidden = true;
+  $("refreshButton").hidden = true;
+  $("projectName").hidden = true;
+  status("Enter fabrication details and update the record.");
   $("scanPanel").hidden = false;
   $("scanIdentity").textContent = `${params.get("assemblyName") || ""} / ${params.get("mark") || ""}`;
   $("scanQuantity").value = params.get("quantity") || "";
   $("scanWeight").value = params.get("weight") || "";
-  if (!FABRICATION_API) return;
+  if (!FABRICATION_API) return status("Fabrication API is not configured.", true);
   try {
     const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-details?${params}`);
     if (!response.ok) throw new Error(`Fabrication lookup failed (${response.status}).`);
@@ -119,7 +124,7 @@ async function saveScanDetails() {
   try {
     const response = await fetch(`${FABRICATION_API.replace(/\/$/, "")}/fabrication-details`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     if (!response.ok) throw new Error(`Fabrication update failed (${response.status}).`);
-    status("Fabrication details updated.");
+    status("Fabrication details saved successfully.");
   } catch (error) { status(`Could not update fabrication details: ${error.message}`, true); }
 }
 async function loadAssignments() {
@@ -245,8 +250,7 @@ $("ifcSelect").addEventListener("change", loadAssemblyNames);
 $("assemblySelect").addEventListener("change", loadAssemblyMarks);
 $("saveScan")?.addEventListener("click", saveScanDetails);
 loadScanDetails();
-(async () => {
-  if (new URLSearchParams(window.location.search).get("scan") === "1") return;
+if (new URLSearchParams(window.location.search).get("scan") !== "1") (async () => {
   try {
     workspace = await TrimbleConnectWorkspace.connect(window.parent, eventHandler, 30000);
     project = await (workspace.project.getCurrentProject?.() || workspace.project.getProject());

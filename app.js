@@ -2,7 +2,7 @@ const COMPLETED_PATH = "/Completed";
 const ORIGINS = ["https://app.connect.trimble.com","https://app21.connect.trimble.com","https://app31.connect.trimble.com","https://app32.connect.trimble.com","https://app22.connect.trimble.com"];
 let workspace, token, project, origin, cwas = [], ifcs = [], projectEntries = [];
 const ERECTION_API = window.ERECTION_PLANNER_API_BASE || "https://followed-recruiting-album-noted.trycloudflare.com/api";
-const FABRICATION_API = window.FABRICATION_API_URL || "";
+const FABRICATION_API = window.FABRICATION_API_URL || "https://projectplanner-api.onrender.com";
 const $ = id => document.getElementById(id);
 const status = (text, error = false) => { $("status").textContent = text; $("status").classList.toggle("error", error); };
 const projectId = () => project?.id || project?.projectId || project?.ProjectId;

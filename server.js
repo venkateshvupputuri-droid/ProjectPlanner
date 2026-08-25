@@ -6,6 +6,34 @@ const app = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false });
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "https://venkateshvupputuri-droid.github.io").split(",").map(value => value.trim());
 
+async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fabrication_details (
+      id BIGSERIAL PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      model_id TEXT,
+      assembly_guid TEXT,
+      assembly_name TEXT NOT NULL,
+      mark TEXT NOT NULL,
+      plan_id TEXT,
+      sequence_order INTEGER,
+      fabricator_name TEXT NOT NULL,
+      completion_date DATE,
+      quantity NUMERIC(12, 3) NOT NULL,
+      weight NUMERIC(12, 3) NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (project_id, file_id, assembly_name, mark)
+    );
+    CREATE TABLE IF NOT EXISTS fabricators (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+}
+
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json({ limit: "64kb" }));
 app.get("/health", (_request, response) => response.json({ ok: true, database: "fabricationdata" }));
@@ -64,4 +92,4 @@ app.get("/fabrication-records", async (request, response) => {
 });
 
 const port = Number(process.env.PORT || 3000);
-app.listen(port, () => console.log(`Fabrication API listening on port ${port}`));
+initializeDatabase().then(() => app.listen(port, () => console.log(`Fabrication API listening on port ${port}`))).catch(error => { console.error("Database initialization failed", error); process.exitCode = 1; });

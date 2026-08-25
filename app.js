@@ -110,6 +110,7 @@ async function saveScanDetails() {
 }
 async function loadAssignments() {
   savedAssignments = [];
+  if (!workspace?.viewer?.getModels) return;
   const file = ifcs.find(item => identifier(item) === $("ifcSelect").value);
   if (!file) return;
   try {

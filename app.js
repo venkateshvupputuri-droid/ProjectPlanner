@@ -51,6 +51,16 @@ function assemblyType(entityType) {
   const type = String(entityType || "").replace(/^IFC/, "").replace(/STANDARDCASE$/i, "");
   return ["BEAM", "COLUMN", "MEMBER", "PLATE", "SLAB", "WALL", "FOOTING", "PILE", "ROOF", "STAIR", "DOOR", "WINDOW"].includes(type) ? type : "";
 }
+function directIfcPropertyValues(text) {
+  const valuesByObject = new Map();
+  const propertyValues = new Map();
+  for (const match of text.matchAll(/#(\d+)\s*=\s*IFCPROPERTYSINGLEVALUE\s*\(\s*'((?:''|[^'])*)'[^;]*?\b(?:IFC[A-Z0-9_]+\s*\(\s*)?'?([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)'?\s*\)?/gis)) propertyValues.set(`#${match[1]}`, { name: propertyKey(match[2]), value: match[3] });
+  for (const relation of text.matchAll(/#\d+\s*=\s*IFCRELDEFINESBYPROPERTIES\s*\([^;]*?\(([^()]*)\)\s*,\s*(#\d+)\s*\)\s*;/gis)) {
+    const objectIds = [...relation[1].matchAll(/#\d+/g)].map(item => item[0]); const propertySet = relation[2]; const propertySetText = text.match(new RegExp(`${propertySet.replace("#", "\\#")}\\s*=\\s*IFCPROPERTYSET\\s*\\([^;]*`, "i"))?.[0] || ""; const propertyIds = [...propertySetText.matchAll(/#\d+/g)].map(item => item[0]);
+    for (const objectId of objectIds) valuesByObject.set(objectId, { ...(valuesByObject.get(objectId) || {}), ...Object.fromEntries(propertyIds.map(id => [propertyValues.get(id)?.name, propertyValues.get(id)?.value]).filter(([name]) => name)) });
+  }
+  return valuesByObject;
+}
 function extractIfcData(text) {
   markMetrics = new Map();
   const entities = new Map(); const properties = new Map(); const relations = [];
@@ -74,6 +84,7 @@ function extractIfcData(text) {
   }
   const valuesByObject = new Map();
   for (const relation of relations) for (const objectId of relation.objects) valuesByObject.set(objectId, { ...(valuesByObject.get(objectId) || {}), ...Object.fromEntries(relation.properties.map(id => { const property = properties.get(id); return [property?.name, property ? { value: property.value, type: property.type } : null]; }).filter(([name]) => name)) });
+  if (!valuesByObject.size) for (const [objectId, values] of directIfcPropertyValues(text)) valuesByObject.set(objectId, Object.fromEntries(Object.entries(values).map(([key, value]) => [key, { value, type: "IFCPROPERTYSINGLEVALUE" }])));
   const linkedMetrics = new Map();
   for (const [objectId, values] of valuesByObject) {
     const markValue = values.ASSEMBLYCASTUNITMARK?.value || values.CASTUNITMARK?.value || values.ASSEMBLYMARK?.value || values.MARK?.value || values.TAG?.value;

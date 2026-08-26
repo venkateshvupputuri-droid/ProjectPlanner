@@ -87,7 +87,7 @@ function extractIfcData(text) {
     const linked = linkedMetrics.get(String(mark));
     const weight = weightInTonnes(weightKey ? value(weightKey) : linked?.weight || 0, weightKey);
     const resolvedQuantity = quantity || linked?.quantity || 0;
-    if (assemblyName && mark) { markMetrics.set(`${assemblyName}|${mark}`, { quantity: resolvedQuantity, weight }); result.push({ id, type: entity.type, assemblyName, mark }); }
+    if (assemblyName && mark) { markMetrics.set(`${assemblyName}|${mark}`, { quantity: resolvedQuantity, weight }); result.push({ id, type: entity.type, assemblyName, mark, quantity: resolvedQuantity, weight }); }
   }
   const grouped = new Map();
   for (const item of result) { if (!grouped.has(item.assemblyName)) grouped.set(item.assemblyName, new Map()); const existing = grouped.get(item.assemblyName).get(item.mark) || { mark: item.mark, quantity: 0, eachWeight: 0, totalWeight: 0 }; existing.quantity += item.quantity || 1; existing.eachWeight ||= item.weight; existing.totalWeight = existing.quantity * existing.eachWeight; grouped.get(item.assemblyName).set(item.mark, existing); }

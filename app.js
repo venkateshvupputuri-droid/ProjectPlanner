@@ -62,7 +62,7 @@ function extractIfcData(text) {
     }
     if (entity.type === "IFCRELDEFINESBYPROPERTIES") {
       const propertySet = [...entity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0]))].at(-1); const propertyEntity = entities.get(propertySet);
-      const objects = [...String(entity.args[3] || "").matchAll(/#\d+/g)].map(item => item[0]);
+      const objects = [...String(entity.args[2] || "").matchAll(/#\d+/g)].map(item => item[0]);
       if (["IFCPROPERTYSET", "IFCELEMENTQUANTITY"].includes(propertyEntity?.type)) relations.push({ objects, properties: propertyEntity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0])) });
     }
   }

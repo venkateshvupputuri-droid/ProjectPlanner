@@ -68,6 +68,14 @@ function extractIfcData(text) {
   }
   const valuesByObject = new Map();
   for (const relation of relations) for (const objectId of relation.objects) valuesByObject.set(objectId, { ...(valuesByObject.get(objectId) || {}), ...Object.fromEntries(relation.properties.map(id => { const property = properties.get(id); return [property?.name, property ? { value: property.value, type: property.type } : null]; }).filter(([name]) => name)) });
+  const linkedMetrics = new Map();
+  for (const [objectId, values] of valuesByObject) {
+    const markValue = values.ASSEMBLYCASTUNITMARK?.value || values.CASTUNITMARK?.value || values.ASSEMBLYMARK?.value || values.MARK?.value || values.TAG?.value;
+    if (!markValue) continue;
+    const weightKey = Object.keys(values).find(key => key === "ASSEMBLYCASTUNITWEIGHT" || key === "CASTUNITWEIGHT" || key === "WEIGHT" || /(?:ASSEMBLY|CASTUNIT).*(?:WEIGHT|MASS)/.test(key));
+    const quantityKey = Object.keys(values).find(key => key === "QUANTITY" || key === "QTY" || key === "COUNT" || key === "CASTUNITQUANTITY");
+    linkedMetrics.set(String(markValue), { weight: weightInTonnes(weightKey ? values[weightKey].value : 0, weightKey), quantity: numericValue(quantityKey ? values[quantityKey].value : 0) });
+  }
   const result = [];
   for (const [id, entity] of entities) {
     const values = valuesByObject.get(id) || {}; const name = ifcString(entity.args[2]);
@@ -76,11 +84,13 @@ function extractIfcData(text) {
     const mark = value("ASSEMBLYCASTUNITMARK") || value("CASTUNITMARK") || value("ASSEMBLYMARK") || value("MARK") || value("TAG") || (entity.type === "IFCELEMENTASSEMBLY" ? ifcString(entity.args[3]) : "");
     const quantity = numericValue(value("QUANTITY") || value("QTY") || value("COUNT") || value("CASTUNITQUANTITY"));
     const weightKey = Object.keys(values).find(key => /(?:ASSEMBLY|CASTUNIT).*(?:WEIGHT|MASS)|WEIGHT|MASS/.test(key));
-    const weight = weightInTonnes(weightKey ? value(weightKey) : 0, weightKey);
-    if (assemblyName && mark) { markMetrics.set(`${assemblyName}|${mark}`, { quantity, weight }); result.push({ id, type: entity.type, assemblyName, mark }); }
+    const linked = linkedMetrics.get(String(mark));
+    const weight = weightInTonnes(weightKey ? value(weightKey) : linked?.weight || 0, weightKey);
+    const resolvedQuantity = quantity || linked?.quantity || 0;
+    if (assemblyName && mark) { markMetrics.set(`${assemblyName}|${mark}`, { quantity: resolvedQuantity, weight }); result.push({ id, type: entity.type, assemblyName, mark }); }
   }
   const grouped = new Map();
-  for (const item of result) { if (!grouped.has(item.assemblyName)) grouped.set(item.assemblyName, new Map()); const existing = grouped.get(item.assemblyName).get(item.mark) || { mark: item.mark, quantity: 0, eachWeight: 0, totalWeight: 0 }; existing.quantity += item.quantity || 1; existing.eachWeight ||= item.weight; existing.totalWeight += item.weight; grouped.get(item.assemblyName).set(item.mark, existing); }
+  for (const item of result) { if (!grouped.has(item.assemblyName)) grouped.set(item.assemblyName, new Map()); const existing = grouped.get(item.assemblyName).get(item.mark) || { mark: item.mark, quantity: 0, eachWeight: 0, totalWeight: 0 }; existing.quantity += item.quantity || 1; existing.eachWeight ||= item.weight; existing.totalWeight = existing.quantity * existing.eachWeight; grouped.get(item.assemblyName).set(item.mark, existing); }
   return [...grouped].map(([assemblyName, marks]) => ({ assemblyName, marks: [...marks.values()].sort((a, b) => a.mark.localeCompare(b.mark)) })).sort((a, b) => a.assemblyName.localeCompare(b.assemblyName));
 }
 function updateAssemblyControls() {

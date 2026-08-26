@@ -47,6 +47,10 @@ function weightInTonnes(value, name = "") {
   const number = numericValue(value);
   return /(?:KG|KILOGRAM)/i.test(name) ? number / 1000 : number;
 }
+function assemblyType(entityType) {
+  const type = String(entityType || "").replace(/^IFC/, "").replace(/STANDARDCASE$/i, "");
+  return ["BEAM", "COLUMN", "MEMBER", "PLATE", "SLAB", "WALL", "FOOTING", "PILE", "ROOF", "STAIR", "DOOR", "WINDOW"].includes(type) ? type : "";
+}
 function extractIfcData(text) {
   markMetrics = new Map();
   const entities = new Map(); const properties = new Map(); const relations = [];
@@ -80,7 +84,7 @@ function extractIfcData(text) {
   for (const [id, entity] of entities) {
     const values = valuesByObject.get(id) || {}; const name = ifcString(entity.args[2]);
     const value = key => values[key]?.value ?? values[key] ?? "";
-    const assemblyName = value("ASSEMBLYNAME") || value("ASSEMBLY") || (entity.type === "IFCELEMENTASSEMBLY" ? name : "");
+    const assemblyName = value("ASSEMBLYNAME") || value("ASSEMBLY") || (entity.type === "IFCELEMENTASSEMBLY" ? name : assemblyType(entity.type));
     const mark = value("ASSEMBLYCASTUNITMARK") || value("CASTUNITMARK") || value("ASSEMBLYMARK") || value("MARK") || value("TAG") || (entity.type === "IFCELEMENTASSEMBLY" ? ifcString(entity.args[3]) : "");
     const quantity = numericValue(value("QUANTITY") || value("QTY") || value("COUNT") || value("CASTUNITQUANTITY"));
     const weightKey = Object.keys(values).find(key => /(?:ASSEMBLY|CASTUNIT).*(?:WEIGHT|MASS)|WEIGHT|MASS/.test(key));

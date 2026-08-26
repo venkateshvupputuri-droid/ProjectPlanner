@@ -65,9 +65,11 @@ function extractIfcData(text) {
       if (name && valueMatch) properties.set(id, { name: propertyKey(name), value: valueMatch[1].replace(/''/g, "'").trim(), type: entity.type });
     }
     if (entity.type === "IFCRELDEFINESBYPROPERTIES") {
-      const propertySet = [...entity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0]))].at(-1); const propertyEntity = entities.get(propertySet);
-      const objects = [...String(entity.args[2] || "").matchAll(/#\d+/g)].map(item => item[0]);
-      if (["IFCPROPERTYSET", "IFCELEMENTQUANTITY"].includes(propertyEntity?.type)) relations.push({ objects, properties: propertyEntity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0])) });
+      const references = entity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0]));
+      const propertySet = references.find(reference => ["IFCPROPERTYSET", "IFCELEMENTQUANTITY"].includes(entities.get(reference)?.type)); const propertyEntity = entities.get(propertySet);
+      const objects = [...String(entity.args[2] || "").matchAll(/#\d+/g)].map(item => item[0]).filter(reference => reference !== propertySet);
+      const relatedObjects = objects.length ? objects : references.filter(reference => reference !== propertySet);
+      if (propertyEntity) relations.push({ objects: relatedObjects, properties: propertyEntity.args.flatMap(argument => [...String(argument).matchAll(/#\d+/g)].map(item => item[0])) });
     }
   }
   const valuesByObject = new Map();

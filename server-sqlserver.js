@@ -5,15 +5,28 @@ const sql = require("mssql/msnodesqlv8");
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "*").split(",").map(value => value.trim());
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) return callback(null, true);
+    callback(null, true);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
+};
 const config = {
   server: process.env.SQL_SERVER || "DESKTOP-MJI8OIQ\\SQLEXPRESS",
   database: process.env.SQL_DATABASE || "ErectionPlanner",
   connectionString: `Driver={ODBC Driver 18 for SQL Server};Server=${process.env.SQL_SERVER || "DESKTOP-MJI8OIQ\\SQLEXPRESS"};Database=${process.env.SQL_DATABASE || "ErectionPlanner"};Trusted_Connection=Yes;Encrypt=No;TrustServerCertificate=Yes;`,
-  options: { trustedConnection: true, trustServerCertificate: true },
-  driver: "msnodesqlv8"
+  options: {
+    trustedConnection: true,
+    trustServerCertificate: true,
+    enableArithAbort: true
+  }
 };
 
-app.use(cors({ origin: allowedOrigins.includes("*") ? true : allowedOrigins }));
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "64kb" }));
 const poolPromise = sql.connect(config);
 const apiRecord = row => row ? ({ project_id: row.ProjectId, file_id: row.FileId, model_id: row.ModelId, assembly_guid: row.AssemblyGuid, assembly_name: row.AssemblyName, mark: row.Mark, plan_id: row.PlanId, sequence_order: row.SequenceOrder, fabricator_name: row.FabricatorName, completion_date: row.CompletionDate, quantity: row.Quantity, weight: row.Weight, updated_at: row.UpdatedAt }) : {};
@@ -60,6 +73,21 @@ app.get("/fabrication-details", async (request, response) => {
       .query("SELECT TOP 1 * FROM dbo.FabricationDetails WHERE ProjectId=@projectId AND FileId=@fileId AND AssemblyName=@assemblyName AND Mark=@mark");
     response.json(apiRecord(result.recordset[0]));
   } catch (error) { console.error(error); response.status(500).json({ error: "Could not read fabrication details." }); }
+});
+
+app.get("/fabrication-details/list", async (request, response) => {
+  try {
+    const pool = await poolPromise;
+    const query = pool.request()
+      .input("projectId", sql.NVarChar, request.query.projectId || "");
+    let sqlText = "SELECT * FROM dbo.FabricationDetails WHERE ProjectId=@projectId";
+    if (request.query.fileId) { query.input("fileId", sql.NVarChar, request.query.fileId); sqlText += " AND FileId=@fileId"; }
+    if (request.query.assemblyName) { query.input("assemblyName", sql.NVarChar, request.query.assemblyName); sqlText += " AND AssemblyName=@assemblyName"; }
+    if (request.query.mark) { query.input("mark", sql.NVarChar, request.query.mark); sqlText += " AND Mark=@mark"; }
+    sqlText += " ORDER BY AssemblyName, Mark";
+    const result = await query.query(sqlText);
+    response.json(result.recordset.map(apiRecord));
+  } catch (error) { console.error(error); response.status(500).json({ error: "Could not list fabrication details." }); }
 });
 
 app.put("/fabrication-details", async (request, response) => {

@@ -60,7 +60,7 @@ app.get("/fabrication-details/list", async (request, response) => {
     if (request.query.fileId) { values.push(String(request.query.fileId)); query += " AND file_id = $2"; }
     if (request.query.assemblyName) { values.push(String(request.query.assemblyName)); query += " AND assembly_name = $3"; }
     if (request.query.mark) { values.push(String(request.query.mark)); query += " AND mark = $4"; }
-    query += " ORDER BY assembly_name, mark";
+    query += " ORDER BY updated_at DESC, assembly_name, mark";
     const result = await pool.query(query, values);
     response.json(result.rows);
   } catch (error) { console.error(error); response.status(500).json({ error: "Could not list fabrication details." }); }

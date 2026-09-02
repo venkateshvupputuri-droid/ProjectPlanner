@@ -5,6 +5,15 @@ const { Pool } = require("pg");
 const app = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false });
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "https://venkateshvupputuri-droid.github.io").split(",").map(value => value.trim());
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) return callback(null, true);
+    callback(null, true);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"]
+};
 
 async function initializeDatabase() {
   await pool.query(`
@@ -34,7 +43,8 @@ async function initializeDatabase() {
   `);
 }
 
-app.use(cors({ origin: allowedOrigins }));
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json({ limit: "64kb" }));
 app.get("/health", (_request, response) => response.json({ ok: true, database: "fabricationdata" }));
 app.get("/fabrication-details", async (request, response) => {
@@ -42,6 +52,18 @@ app.get("/fabrication-details", async (request, response) => {
     const result = await pool.query("SELECT * FROM fabrication_details WHERE project_id = $1 AND file_id = $2 AND assembly_name = $3 AND mark = $4", [request.query.projectId, request.query.fileId, request.query.assemblyName, request.query.mark]);
     response.json(result.rows[0] || {});
   } catch (error) { console.error(error); response.status(500).json({ error: "Could not read fabrication details." }); }
+});
+app.get("/fabrication-details/list", async (request, response) => {
+  try {
+    const values = [String(request.query.projectId || "")];
+    let query = "SELECT * FROM fabrication_details WHERE project_id = $1";
+    if (request.query.fileId) { values.push(String(request.query.fileId)); query += " AND file_id = $2"; }
+    if (request.query.assemblyName) { values.push(String(request.query.assemblyName)); query += " AND assembly_name = $3"; }
+    if (request.query.mark) { values.push(String(request.query.mark)); query += " AND mark = $4"; }
+    query += " ORDER BY assembly_name, mark";
+    const result = await pool.query(query, values);
+    response.json(result.rows);
+  } catch (error) { console.error(error); response.status(500).json({ error: "Could not list fabrication details." }); }
 });
 app.put("/fabrication-details", async (request, response) => {
   const { projectId, fileId, modelId, assemblyGuid, assemblyName, mark, planId, sequenceOrder, fabricatorName, completionDate, quantity, weight } = request.body || {};
